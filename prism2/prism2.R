@@ -5,11 +5,30 @@ library(readstata13)
 setwd("~/bin/ama1/prism2")
 
 
-cohort_meta <- read.dta13("stata/allVisits.dta") %>%
-  select(cohortid, hhid, date, qpcr) %>%
-  mutate(cohortid = as.character(cohortid))
-seekdeep <- read_tsv("data/pfama1_sampInfo.tab.txt")
+cohort_meta <- read.dta13("stata/allVisits.dta")
+seekdeep <- read_tsv("data/filtered_prism2.tab.txt")
 
+# extract metadata for prism2 samples
+prism2 <- seekdeep %>%
+  filter(!grepl('ctrl', s_Sample)) %>%
+  tidyr::extract(
+    s_Sample,
+    into=c('date', 'cohortid'),
+    regex="([[:alnum:]-]{10}\\b)-([[:alnum:]]{4}\\b)"
+  ) %>%
+  mutate(
+    date = lubridate::ymd(date)
+  )
+
+# extract metadata for control samples
+controls <- seekdeep %>%
+  filter(grepl('ctrl', s_Sample)) %>%
+  tidyr::extract(
+    s_Sample,
+    into=c('strain_combination', 'concentration'),
+    regex="ctrl-38x-([[:alnum:]a-zA-Z]{3}\\b)-([[:alnum:]a-zA-Z]{2,3}\\b)"
+  ) %>%
+  mutate(concentration = as.numeric(gsub('[kK]', '000', concentration)))
 
 #################################
 # comparison of reads by sample #
@@ -30,12 +49,10 @@ ggsave("plots/run_summary.png", run_summary_plot, width = 10, height = 8)
 # comparison of haplotypes in controls #
 ########################################
 
-controls <- seekdeep %>%
-  filter(grepl('ctrl', s_Sample))
 control_bars <- ggplot(controls,
-    aes(x = s_Sample, y = c_AveragedFrac, fill = as.factor(c_clusterID))) +
+    aes(x = strain_combination, y = c_AveragedFrac, fill = as.factor(c_clusterID))) +
   geom_bar(stat = 'identity') +
-  facet_grid(~s_COI, scales = 'free') +
+  facet_grid(concentration~s_COI, scales = 'free') +
   theme_classic() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
 
@@ -46,60 +63,102 @@ ggsave("plots/control_bars.png", control_bars)
 # haplotype~sample frequencies #
 ################################
 
-ggplot(seekdeep %>% select(h_popUID, h_SampCnt) %>% unique(),
-    aes(x = h_popUID, y = h_SampCnt)) +
-  geom_bar(stat = 'identity')
 
-ggplot(seekdeep, aes(x = h_popUID, y = h_SampFrac)) +
-  geom_point()
 
-ggplot(seekdeep, aes(h_SampFrac)) +
-  geom_density(fill = 'peru')
 
-seekdeep %>%
-  select(h_popUID) %>%
+#########################
+# Visit Parasite Status #
+#########################
+cohort_meta %>% colnames() %>% as.tibble()
+
+# convert long strings to bools
+cohort_meta <- cohort_meta %>%
+  select(cohortid, date, fever, qpcr, qPCRdich, parasitedensity) %>%
+  mutate(cohortid = as.character(cohortid)) %>%
+  mutate(malariaCall = case_when(
+      parasitedensity > 0  ~ TRUE, # if pdensity is positive
+      TRUE ~ FALSE # default case
+    )
+  ) %>%
+  mutate(fever = case_when(
+      fever == 'no' ~ FALSE,
+      fever == 'yes' ~ TRUE
+    )
+  )
+
+# create fill status and colour status
+cohort_meta <- cohort_meta %>%
+  mutate(fill_status = case_when(
+    fever == TRUE & malariaCall == TRUE ~ 'parasite_positive',
+    fever == FALSE & malariaCall == TRUE ~ 'parasite_positive',
+    fever == FALSE & qPCRdich == 1 ~ 'parasite_positive',
+    TRUE ~ 'parasite_negative'
+    )) %>%
+  mutate(colour_status = case_when(
+    fever == TRUE & malariaCall == TRUE ~ 'fever-bloodsmear+',
+    fever == FALSE & malariaCall == TRUE & qPCRdich == 1 ~ 'asymp-bloodsmear+',
+    fever == FALSE & malariaCall == FALSE & qPCRdich == 1 ~ 'asymp-qpcr+',
+    TRUE ~ 'qpcr-'
+    ))
+
+# merge prism2 data with cohort meta
+prism2 <- prism2 %>%
+  inner_join(cohort_meta)
+
+# calculate number of infection events by cohortid
+prism2 <- prism2 %>%
+  select(date, cohortid) %>%
   unique() %>%
-  dim()
+  group_by(cohortid) %>%
+  summarise(
+    infection_events = n()
+  ) %>%
+  left_join(prism2)
 
-seekdeep %>%
-  filter(h_SampFrac > 0.01) %>%
-  select(h_popUID) %>%
-  unique() %>%
-  dim()
-
+prism2 <- prism2 %>%
+  mutate(
+    hap_qpcr = c_AveragedFrac * qpcr,
+    shapeBool = ifelse(fill_status == 'parasite_negative', 1, 0)
+  )
 
 ####################################
 # CID Over time  // Timeline Plots #
 ####################################
 
-sdf <- seekdeep %>%
-  filter(grepl('20', s_Sample)) %>%
-  tidyr::extract(
-    s_Sample,
-    into = c("date", "cid"),
-    regex = "([[:alnum:]-]{10}\\b)-([[:alnum:]]{4}\\b)"
-  ) %>%
-  mutate(date = lubridate::ymd(date))
+# plot timelines without haplotype data
+patient_timeline <- ggplot(data = cohort_meta %>%
+  filter(!is.na(qPCRdich)),
+  aes(x = date, y = cohortid)) +
+  geom_point(shape = 21, size = 2, aes(fill = as.factor(colour_status), alpha = as.factor(fill_status))) +
+  theme_classic()
+ggsave('plots/patientTimelines.png', patient_timeline, width = 10, height = 12)
 
-sdf <- sdf %>%
-  group_by(cid) %>%
-  summarise(ph_mean = mean(s_COI)) %>%
-  left_join(sdf)
+# haplodrop
+haplodrop <- ggplot(data = prism2 %>% filter(infection_events > 2)) +
 
-sdf <- sdf %>%
-  select(cid, date) %>%
-  unique() %>%
-  group_by(cid) %>%
-  summarise(p_visits = n()) %>%
-  left_join(sdf)
+  # haplotype squares
+  geom_point(shape = 22,
+    aes(x = date, y = factor(h_popUID), size = log10(hap_qpcr), fill = factor(h_popUID))) +
 
-sdf <- sdf %>%
-  left_join(cohort_meta, by=c('date', 'cid' = 'cohortid')) %>%
-  mutate(
-    hap_density = c_AveragedFrac * qpcr,
-    h_popUID = gsub('pfama1.', '', h_popUID)
-  )
+  # timeline points
+  geom_point(size = 3, alpha = 0.4, aes(
+    x = date,
+    y = 'visit',
+    shape = as.factor(shapeBool),
+    colour = as.factor(interaction(fill_status, colour_status)))) +
 
-ggplot(sdf %>% filter(ph_mean > 2) %>% filter(p_visits > 1), aes(x = date, y = h_popUID)) +
-  geom_point(aes(size = hap_density), shape = 22) +
-  facet_wrap(~cid, scales = 'free')
+  # theme and facets
+  facet_wrap(~cohortid, scale = 'free_y') +
+  theme_classic() +
+  guides(fill=FALSE,
+    colour = guide_legend(title = 'Visit Type'),
+    size = guide_legend(title = 'qPCR (log10)'),
+    shape=F
+    ) +
+  scale_colour_manual(values = c('forestgreen','royalblue','red','peru','black')) +
+  scale_shape_manual(values = c(16, 21)) +
+  scale_y_discrete(expand= c(0,1)) +
+  theme(aspect.ratio = 1.5,
+    axis.text.y =  element_text(angle = 30)) +
+  labs(x = 'Date', y = 'Haplotype Population', title = 'Haplotype Timelines')
+ggsave("plots/haplodrop.png", haplodrop, width = 25, height = 12)
