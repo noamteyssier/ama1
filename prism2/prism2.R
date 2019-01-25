@@ -1,6 +1,10 @@
 library(tidyverse)
 library(ggpubr)
 library(readstata13)
+library(vegan)
+library(qgraph)
+library(tidygraph)
+library(ggraph)
 
 setwd("~/bin/ama1/prism2")
 
@@ -8,6 +12,7 @@ setwd("~/bin/ama1/prism2")
 cohort_meta <- read.dta13("stata/allVisits.dta")
 seekdeep <- read_tsv("data/filtered_prism2.tab.txt")
 vcf <- read_tsv("data/filtered_pfama1.vcf")
+snpdist <- read_tsv("data/filtered_snpDist.tab")
 snpdb <- read_tsv("data/ama1_snpInfo.db.tab")
 
 # extract metadata for prism2 samples
@@ -133,6 +138,75 @@ snp_occurrence_plot <- ggplot(known_snps, aes(log2(snp_occurrence), fill = known
   geom_density(position = 'identity', alpha = 0.8) +
   theme_classic()
 ggsave("plots/snp_occurrence.png", snp_occurrence_plot, width = 10, height = 10)
+
+###################################
+# SNP Distance between Haplotypes #
+###################################
+
+hap_mat <- vcf[-seq(1,9,1)] %>%
+  as.matrix()
+hap_mat[hap_mat > 0] <- 1
+snp_frequencies <- cbind(vcf, snpFreq=rowMeans(hap_mat)) %>%
+  as.data.frame() %>%
+  gather('haplotype', 'bool', -snpFreq, -POS) %>%
+  filter(
+    bool > 0,
+    grepl('pfama1', haplotype)
+  )
+(snp_frequencies %>% select(POS, snpFreq) %>% unique())$snpFreq %>% hist()
+
+snp_frequencies %>% group_by(snpFreq) %>% summarise(c = mean(snpFreq))
+
+# gather haplotype relevant statistics
+haploStats <- prism2 %>%
+  group_by(h_popUID) %>%
+  summarise(
+    n_timesFound = n(),
+    readCount = sum(c_ReadCnt),
+    meanPC = mean(c_AveragedFrac),
+    meanRC = mean(c_ReadCnt),
+    meanCI = mean(c_clusterID)
+  ) %>%
+  mutate(h_popUID = as.numeric(gsub('pfama1.', '', h_popUID)))
+
+# convert snpdist matrix to lower triangular
+snpdist[upper.tri(snpdist)] <- NA
+
+# convert triangular distance matrix to longform table
+haploGraph <- snpdist %>%
+  gather('haplotype_2', 'steps', -haplotype) %>%
+  filter(!is.na(steps)) %>%
+  mutate(
+    haplotype = gsub('pfama1.','',haplotype),
+    haplotype = as.numeric(gsub('_f[[:alnum:].]+','', haplotype)),
+    haplotype_2 = gsub('pfama1.','',haplotype_2),
+    haplotype_2 = as.numeric(gsub('_f[[:alnum:].]+','', haplotype_2))
+  )
+
+# convert to table_graph object
+hg <- as_tbl_graph(haploGraph) %>%
+
+  # node based dplyr
+  activate(nodes) %>%
+  left_join(haploStats %>% mutate(h_popUID = as.character(h_popUID)), by = c('name' = 'h_popUID')) %>%
+  mutate(shapeBool = ifelse(meanRC < 1000, 'tri', 'circle')) %>%
+
+  # edge based dplyr
+  activate(edges) %>%
+  filter(steps < 3) %>%
+  mutate(fixedAlpha = ifelse(steps == 1, 1, 0.75)) # fixed alpha size (gray 1 steps)
+
+
+ggraph(hg) +
+  geom_edge_fan(aes(width = as.factor(steps),  alpha = as.factor(fixedAlpha))) +
+  theme_graph() +
+  scale_edge_width_discrete(range = c(1,0.75)) +
+  scale_edge_alpha_discrete(range = c(0.5, 1)) +
+  # geom_node_label(aes(label = numPatients), nudge_x = 0.25, nudge_y = 0.25, size = 2.5) +
+  geom_node_point(aes(size = meanPC, fill = minFreq, shape = shapeBool))
+
+
+
 
 #########################
 # Visit Parasite Status #
