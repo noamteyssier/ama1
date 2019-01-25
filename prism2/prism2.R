@@ -8,6 +8,7 @@ setwd("~/bin/ama1/prism2")
 cohort_meta <- read.dta13("stata/allVisits.dta")
 seekdeep <- read_tsv("data/filtered_prism2.tab.txt")
 vcf <- read_tsv("data/filtered_pfama1.vcf")
+snpdb <- read_tsv("data/ama1_snpInfo.db.tab")
 
 # extract metadata for prism2 samples
 prism2 <- seekdeep %>%
@@ -82,14 +83,19 @@ longform_vcf <- vcf %>%
   mutate(
     hid = gsub('pfama1.', '', hid),
     population_frequency = as.numeric(population_frequency)
-  ) %>%
-  group_by(POS, snp) %>%
+  )
+
+# calculate snp frequency in population and occurrence of snp across haplotypes
+longform_vcf <- longform_vcf %>%
+  filter(snp > 0) %>%
+  group_by(POS) %>%
   summarise(
-    snp_frequency = mean(population_frequency)
+    snp_frequency = mean(population_frequency),
+    snp_occurrence = n()
   ) %>%
   left_join(longform_vcf)
 
-# snp frequency plot
+# snp position and frequency plot
 snp_frequency <- ggplot(longform_vcf %>% filter(snp > 0), aes(x = POS, y = hid, fill = snp_frequency)) +
   geom_point(shape = 22, size = 2) +
   theme_classic() +
@@ -97,9 +103,36 @@ snp_frequency <- ggplot(longform_vcf %>% filter(snp > 0), aes(x = POS, y = hid, 
   scale_fill_gradientn(
     colours = c('navyblue', 'peru', 'firebrick4'),
     breaks = c(0.01,0.1,0.3)
-  )
+  ) +
+  scale_x_continuous(breaks = c(seq(0,200,10)))
 ggsave("plots/snp_frequency.png", snp_frequency)
 
+
+# process known snp database from PlasmoDB minor allele frequencies
+maf <- snpdb %>%
+  mutate(
+    reference_position = gsub('Pf3D7_11_v3:_', '', Location),
+    reference_position = as.numeric(gsub(',','', reference_position))
+  ) %>%
+  select(reference_position, Minor_Allele_Frequency)
+
+# join prism2 data with MAF db and apply bool if found in db
+known_snps <- longform_vcf %>%
+  mutate(
+    reference_position = POS + 1294307
+  ) %>%
+  left_join(maf) %>%
+  select(POS, Minor_Allele_Frequency, snp_occurrence) %>%
+  unique() %>%
+  mutate(
+    known_snp = ifelse(is.na(Minor_Allele_Frequency), FALSE, TRUE)
+  )
+
+# plot densities of snp occurrence split by found/notfound
+snp_occurrence_plot <- ggplot(known_snps, aes(log2(snp_occurrence), fill = known_snp)) +
+  geom_density(position = 'identity', alpha = 0.8) +
+  theme_classic()
+ggsave("plots/snp_occurrence.png", snp_occurrence_plot, width = 10, height = 10)
 
 #########################
 # Visit Parasite Status #
