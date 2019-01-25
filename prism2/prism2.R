@@ -7,6 +7,7 @@ setwd("~/bin/ama1/prism2")
 
 cohort_meta <- read.dta13("stata/allVisits.dta")
 seekdeep <- read_tsv("data/filtered_prism2.tab.txt")
+vcf <- read_tsv("data/filtered_pfama1.vcf")
 
 # extract metadata for prism2 samples
 prism2 <- seekdeep %>%
@@ -64,6 +65,40 @@ ggsave("plots/control_bars.png", control_bars)
 ################################
 
 
+
+
+##########################
+# Haplotype VCF Analysis #
+##########################
+
+longform_vcf <- vcf %>%
+  select(-ID, -REF, -ALT, -QUAL, -FILTER, -INFO, -FORMAT) %>%
+  gather('sample', 'snp', -CHROM, -POS) %>%
+  separate(
+    sample,
+    into=c('hid', 'population_frequency'),
+    sep = "_f"
+  ) %>%
+  mutate(
+    hid = gsub('pfama1.', '', hid),
+    population_frequency = as.numeric(population_frequency)
+  ) %>%
+  group_by(POS, snp) %>%
+  summarise(
+    snp_frequency = mean(population_frequency)
+  ) %>%
+  left_join(longform_vcf)
+
+# snp frequency plot
+snp_frequency <- ggplot(longform_vcf %>% filter(snp > 0), aes(x = POS, y = hid, fill = snp_frequency)) +
+  geom_point(shape = 22, size = 2) +
+  theme_classic() +
+  theme(axis.text.y = element_text(size = 5, angle = 20)) +
+  scale_fill_gradientn(
+    colours = c('navyblue', 'peru', 'firebrick4'),
+    breaks = c(0.01,0.1,0.3)
+  )
+ggsave("plots/snp_frequency.png", snp_frequency)
 
 
 #########################
