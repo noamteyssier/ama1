@@ -141,9 +141,11 @@ known_snps <- longform_vcf %>%
     known_snp = ifelse(is.na(Minor_Allele_Frequency), FALSE, TRUE)
   )
 
+num_haps <- (longform_vcf %>% select(hid) %>% unique() %>% dim())[1]
 # plot densities of snp occurrence split by found/notfound
-snp_occurrence_plot <- ggplot(known_snps, aes(log2(snp_occurrence), fill = known_snp)) +
+snp_occurrence_plot <- ggplot(known_snps, aes(log10(snp_occurrence / num_haps), fill = known_snp)) +
   geom_density(position = 'identity', alpha = 0.8) +
+  xlab("percentage of haplotypes snp found in (log10)") +
   theme_classic()
 ggsave("plots/snp_occurrence.png", snp_occurrence_plot, width = 10, height = 10)
 
@@ -223,6 +225,9 @@ cairo_pdf(filename = "plots/haploGraph.pdf", width = 10, height = 10)
 plot(g)
 dev.off()
 
+####################################
+# Haplotype Position Differentials #
+####################################
 
 # function to find positions of difference between two haplotypes
 snp_diff <- function(df, hap_pos_freq){
@@ -251,16 +256,58 @@ snp_diff <- function(df, hap_pos_freq){
   return (pos_diff)
 }
 
-positional_haplotype_differences <- apply(haploGraph %>% filter(steps < 5), 1, snp_diff, haplotype_positional_frequency) %>%
+positional_haplotype_differences <- apply(haploGraph, 1, snp_diff, haplotype_positional_frequency) %>%
   bind_rows()
 
-step_frequency_density <- ggplot(positional_haplotype_differences, aes(x = snp_frequency, fill = as.factor(steps))) +
+step_frequency_density <- ggplot(positional_haplotype_differences %>% filter(steps < 5), aes(x = snp_frequency, fill = as.factor(steps))) +
   geom_density(alpha = 0.5)
 ggsave("plots/stepFreqDensity.png", step_frequency_density, width = 10, height = 8)
+
+to_remove <- haploGraph %>%
+  left_join(
+    positional_haplotype_differences,
+    by = c('haplotype' = 'h1', 'haplotype_2' = 'h2', 'steps')
+  ) %>%
+  filter(snp_frequency < 0.05) %>%
+  select(haplotype, haplotype_2) %>%
+  unique()
+
+filt_haploGraph <- haploGraph %>%
+  anti_join(to_remove)
+
+filt_hg <- as_tbl_graph(filt_haploGraph) %>%
+
+  # node based dplyr
+  activate(nodes) %>%
+  left_join(haploStats %>% mutate(h_popUID = as.character(h_popUID)), by = c('name' = 'h_popUID')) %>%
+  mutate(shapeBool = ifelse(meanRC < 1000, '<1000rc', '>1000rc')) %>%
+  filter(!is.na(shapeBool)) %>%
+
+  # edge based dplyr
+  activate(edges) %>%
+  filter(steps < 2) %>%
+  mutate(fixedAlpha = ifelse(steps == 1, 1, 0.75)) # fixed alpha size (gray 1 steps)
+
+filt_g <- ggraph(filt_hg) +
+  theme_graph() +
+  geom_edge_fan(aes(width = as.factor(steps),  alpha = as.factor(fixedAlpha))) +
+  geom_node_point(aes(size = meanPC, fill = meanCI, shape = shapeBool)) +
+  geom_node_label(aes(label = n_timesFound), nudge_x = 0.25, nudge_y = 0.25, size = 2.5) +
+  scale_edge_width_discrete(range = c(1,0.75)) +
+  scale_edge_alpha_discrete(range = c(0.5, 1)) +
+  scale_alpha(range = c(1,1)) +
+  scale_shape_manual(values = c(21,24))  +
+  scale_fill_gradientn(colours = c('peru', 'red', 'navy') %>% rev())
+
+cairo_pdf(filename = "plots/filt_haploGraph.pdf", width = 10, height = 10)
+plot(filt_g)
+dev.off()
+
 
 #########################
 # Visit Parasite Status #
 #########################
+
 cohort_meta %>% colnames() %>% as.tibble()
 
 # convert long strings to bools
