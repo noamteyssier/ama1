@@ -153,6 +153,7 @@ snp_frequencies <- cbind(vcf, snpFreq=rowMeans(hap_mat)) %>%
     bool > 0,
     grepl('pfama1', haplotype)
   )
+
 (snp_frequencies %>% select(POS, snpFreq) %>% unique())$snpFreq %>% hist()
 
 snp_frequencies %>% group_by(snpFreq) %>% summarise(c = mean(snpFreq))
@@ -189,22 +190,30 @@ hg <- as_tbl_graph(haploGraph) %>%
   # node based dplyr
   activate(nodes) %>%
   left_join(haploStats %>% mutate(h_popUID = as.character(h_popUID)), by = c('name' = 'h_popUID')) %>%
-  mutate(shapeBool = ifelse(meanRC < 1000, 'tri', 'circle')) %>%
+  mutate(shapeBool = ifelse(meanRC < 1000, '<1000rc', '>1000rc')) %>%
+  filter(!is.na(shapeBool)) %>%
 
   # edge based dplyr
   activate(edges) %>%
-  filter(steps < 3) %>%
+  filter(steps < 2) %>%
   mutate(fixedAlpha = ifelse(steps == 1, 1, 0.75)) # fixed alpha size (gray 1 steps)
 
+hg %>% activate(nodes) %>% filter(is.na(shapeBool))
 
-ggraph(hg) +
-  geom_edge_fan(aes(width = as.factor(steps),  alpha = as.factor(fixedAlpha))) +
+g <- ggraph(hg) +
   theme_graph() +
+  geom_edge_fan(aes(width = as.factor(steps),  alpha = as.factor(fixedAlpha))) +
+  geom_node_point(aes(size = meanPC, fill = meanCI, shape = shapeBool)) +
+  geom_node_label(aes(label = n_timesFound), nudge_x = 0.25, nudge_y = 0.25, size = 2.5) +
   scale_edge_width_discrete(range = c(1,0.75)) +
   scale_edge_alpha_discrete(range = c(0.5, 1)) +
-  # geom_node_label(aes(label = numPatients), nudge_x = 0.25, nudge_y = 0.25, size = 2.5) +
-  geom_node_point(aes(size = meanPC, fill = minFreq, shape = shapeBool))
+  scale_alpha(range = c(1,1)) +
+  scale_shape_manual(values = c(21,24))  +
+  scale_fill_gradientn(colours = c('peru', 'red', 'navy') %>% rev())
 
+cairo_pdf(filename = "plots/haploGraph.pdf", width = 10, height = 10)
+plot(g)
+dev.off()
 
 
 
