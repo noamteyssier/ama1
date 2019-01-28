@@ -5,6 +5,7 @@ library(vegan)
 library(qgraph)
 library(tidygraph)
 library(ggraph)
+library(ggridges)
 
 setwd("~/bin/ama1/prism2")
 
@@ -99,6 +100,13 @@ longform_vcf <- longform_vcf %>%
     snp_occurrence = n()
   ) %>%
   left_join(longform_vcf)
+
+# quick join for haplotype and positional frequencies of snps found in hap
+haplotype_positional_frequency <- longform_vcf %>%
+  filter(snp > 0) %>%
+  select(-snp, -CHROM) %>%
+  mutate(hid = as.numeric(hid))
+
 
 # snp position and frequency plot
 snp_frequency <- ggplot(longform_vcf %>% filter(snp > 0), aes(x = POS, y = hid, fill = snp_frequency)) +
@@ -215,6 +223,39 @@ cairo_pdf(filename = "plots/haploGraph.pdf", width = 10, height = 10)
 plot(g)
 dev.off()
 
+
+# function to find positions of difference between two haplotypes
+snp_diff <- function(df, hap_pos_freq){
+  # df = [h1, h2, steps]
+  # hap_pos_freq = [POS, snp_frequency, hid]
+  # output = [POS, h1, h2, snp_frequency]
+
+  pos_snp_freq <- haplotype_positional_frequency %>%
+    select(POS, snp_frequency) %>%
+    unique()
+
+  pos_diff <- hap_pos_freq %>%
+    filter(hid %in% c(df[1], df[2])) %>%
+    select(POS, hid) %>%
+    group_by(POS) %>%
+    summarise(count = n()) %>%
+    filter(count == 1) %>%
+    select(-count) %>%
+    mutate(
+      h1 = as.numeric(df[1]),
+      h2 = as.numeric(df[2]),
+      steps = as.numeric(df[3])
+    ) %>%
+    left_join(pos_snp_freq, by = 'POS')
+
+  return (pos_diff)
+}
+
+positional_haplotype_differences <- apply(haploGraph %>% filter(steps < 5), 1, snp_diff, haplotype_positional_frequency) %>%
+  bind_rows()
+
+ggplot(positional_haplotype_differences, aes(x = snp_frequency, fill = as.factor(steps))) +
+  geom_density_ridges(position = 'identity', alpha = 0.7)
 
 
 #########################
