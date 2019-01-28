@@ -255,8 +255,7 @@ positional_haplotype_differences <- apply(haploGraph %>% filter(steps < 5), 1, s
   bind_rows()
 
 ggplot(positional_haplotype_differences, aes(x = snp_frequency, fill = as.factor(steps))) +
-  geom_density_ridges(position = 'identity', alpha = 0.7)
-
+  geom_density(alpha = 0.5)
 
 #########################
 # Visit Parasite Status #
