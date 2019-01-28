@@ -254,8 +254,9 @@ snp_diff <- function(df, hap_pos_freq){
 positional_haplotype_differences <- apply(haploGraph %>% filter(steps < 5), 1, snp_diff, haplotype_positional_frequency) %>%
   bind_rows()
 
-ggplot(positional_haplotype_differences, aes(x = snp_frequency, fill = as.factor(steps))) +
+step_frequency_density <- ggplot(positional_haplotype_differences, aes(x = snp_frequency, fill = as.factor(steps))) +
   geom_density(alpha = 0.5)
+ggsave("plots/stepFreqDensity.png", step_frequency_density, width = 10, height = 8)
 
 #########################
 # Visit Parasite Status #
