@@ -401,3 +401,11 @@ haplodrop <- ggplot(data = prism2 %>% filter(infection_events > 2)) +
     axis.text.y =  element_text(angle = 30)) +
   labs(x = 'Date', y = 'Haplotype Population', title = 'Haplotype Timelines')
 ggsave("plots/haplodrop.png", haplodrop, width = 25, height = 12)
+
+#############################################
+# Creating Haplotype Infection Event Tables #
+#############################################
+
+df <- prism2 %>%
+  select(date, cohortid, h_popUID, hap_qpcr)
+write_tsv(df, "data/prism2_timeline.tab")
