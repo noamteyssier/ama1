@@ -68,6 +68,7 @@ class Timeline:
                     if t not in self.t_hist:
                         self.t_hist[t] = 0
                     self.t_hist[t] += 1
+                    
     def __simplify_triplets__(self):
         """simplify triplets for likelihood calculations"""
         for t in self.t_hist:
@@ -89,12 +90,12 @@ class Timeline:
     def fit_MS(self):
         """optimize M and S fit linearly"""
         theta = np.random.rand(2)
-        # self.calculate_likelihood(theta)
         return minimize(
             self.calculate_logLikelihood, theta, method = 'Nelder-Mead'
         )
 
-    def parameter_limit(self, param):
+    def __parameter_limit__(self, param):
+        """set bounds of parameter between 1 and 0"""
         if param == 1:
             return param - 1e-5
         elif param == 0:
@@ -102,7 +103,7 @@ class Timeline:
         else:
             return param
 
-    def calculate_logLikelihood(self, theta):
+    def __calculate_logLikelihood__(self, theta):
         """calculate log likelihood as -sum(x_i * log(l_i))"""
 
         m, s = theta
@@ -123,9 +124,6 @@ class Timeline:
         )
 
         return (-1 * log_likelihood)
-
-    def fit(self):
-        pass
 
 
 
