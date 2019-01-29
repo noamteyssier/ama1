@@ -4,6 +4,7 @@
 - number of reads per fastq
 - number of dropouts post-mapping
 - number of chimeras per sample
+- list of everything with zero reads
 
 ## Haplotype Filtering
 - filter haplotypes with OOSSLF method

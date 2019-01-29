@@ -15,6 +15,7 @@ seekdeep <- read_tsv("data/filtered_prism2.tab.txt")
 vcf <- read_tsv("data/filtered_pfama1.vcf")
 snpdist <- read_tsv("data/filtered_snpDist.tab")
 snpdb <- read_tsv("data/ama1_snpInfo.db.tab")
+readcounts <- read_tsv("data/readCounts.tab")
 
 # extract metadata for prism2 samples
 prism2 <- seekdeep %>%
@@ -44,14 +45,88 @@ controls <- seekdeep %>%
 
 run_summary <- seekdeep %>%
   group_by(s_Sample) %>%
-  summarise(totalReads = sum(c_ReadCnt))
+  summarise(totalReads = sum(c_ReadCnt)) %>%
+  mutate(
+    count_bin = case_when(
+      totalReads == 0 ~ "0",
+      totalReads <= 10 ~ ">0",
+      totalReads <= 100 ~ ">10",
+      totalReads <= 1000 ~ ">100",
+      totalReads <= 10000 ~ ">1000",
+      TRUE ~ ">10000"
+    )
+  )
 
 run_summary_plot <- ggplot(run_summary,
   aes(x = reorder(s_Sample, totalReads), y = log10(totalReads))) +
   geom_bar(stat = 'identity') +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, size = 3))
-
 ggsave("plots/run_summary.png", run_summary_plot, width = 10, height = 8)
+
+cid_date_bar <- ggplot(run_summary %>%
+    filter(grepl('20', s_Sample)) %>%
+    group_by(count_bin) %>%
+    summarise(c = n()),
+  aes(x = as.factor(count_bin), y = c)) +
+  geom_bar(stat = 'identity') +
+  theme_classic() +
+  xlab("Read Counts") +
+  ylab("Number of cid~date")
+ggsave("plots/sample_binned_readCounts.png", cid_date_bar, width = 8, height = 8)
+
+#############################################
+# comparison of read counts by sample fastq #
+#############################################
+
+rc <- readcounts %>%
+  filter(grepl('20', sample)) %>%
+  tidyr::extract(
+    sample,
+    into=c('date','cid','plate','rep'),
+    regex="([[:graph:]]{10}\\b)-([[:alnum:]]{4}\\b)-PR2-([[:alnum:]]{3,4}\\b)-([[:alnum:]])"
+  ) %>%
+  gather('filter_status', 'count', -date, -cid, -plate, -rep )
+
+binned <- rc %>%
+  mutate(
+    count_bin = case_when(
+      count == 0 ~ " 0 ",
+      count <= 10 ~ ">0",
+      count <= 100 ~ ">10",
+      count <= 1000 ~ ">100",
+      count <= 10000 ~ ">1000",
+      TRUE ~ ">10000"
+    )
+  ) %>%
+  group_by(filter_status, count_bin) %>%
+  summarise(num_bin = n())
+
+binned <- binned %>%
+  group_by(filter_status) %>%
+  summarise(total = sum(num_bin)) %>%
+  left_join(binned) %>%
+  mutate(pc_bin = num_bin / total)
+
+# bar plot of binned read count percentages
+binned_percentages <- ggplot(binned, aes(x = as.factor(count_bin), y = pc_bin, fill = filter_status)) +
+  geom_bar(stat = 'identity', position = 'dodge') +
+  scale_fill_manual(values = c('firebrick4', "burlywood4")) +
+  theme_classic() +
+  ylab("Percentage of Samples") +
+  xlab("Read Count")
+ggsave("plots/fastq_binned_readCounts.png", binned_percentages, width = 8, height = 8)
+
+# density plot of read counts filtered/unfiltered
+read_count_densities <- ggplot(rc %>% mutate(count = ifelse(count == 0, 0.1, count)),
+    aes(log10(count), fill = filter_status)) +
+  geom_density(position = 'identity', alpha = 0.5) +
+  scale_fill_manual(values = c('cadetblue4', "firebrick4")) +
+  xlab("Density of read counts pre/post filtering (log10)") +
+  ylab("Percent of Samples") +
+  theme_classic()
+ggsave("plots/read_densities.png", read_count_densities, width = 10, height = 8)
+
+
 
 ########################################
 # comparison of haplotypes in controls #
