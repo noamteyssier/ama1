@@ -8,8 +8,8 @@ setwd("~/bin/ama1/prism2")
 
 cohort_meta <- read.dta13("stata/allVisits.dta")
 seekdeep <- read_tsv("data/filtered_prism2.tab.txt")
-vcf <- read_tsv("data/filtered_pfama1.vcf")
-snpdist <- read_tsv("data/filtered_snpDist.tab")
+vcf <- read_tsv("seq_data/filtered_pfama1.vcf")
+snpdist <- read_tsv("seq_data/filtered_snpDist.tab")
 snpdb <- read_tsv("data/ama1_snpInfo.db.tab")
 readcounts <- read_tsv("data/readCounts.tab")
 
