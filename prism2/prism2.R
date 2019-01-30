@@ -1,11 +1,7 @@
 library(tidyverse)
-library(ggpubr)
 library(readstata13)
-library(vegan)
-library(qgraph)
 library(tidygraph)
 library(ggraph)
-library(ggridges)
 
 setwd("~/bin/ama1/prism2")
 
@@ -216,8 +212,8 @@ known_snps <- longform_vcf %>%
     known_snp = ifelse(is.na(Minor_Allele_Frequency), FALSE, TRUE)
   )
 
-num_haps <- (longform_vcf %>% select(hid) %>% unique() %>% dim())[1]
 # plot densities of snp occurrence split by found/notfound
+num_haps <- (longform_vcf %>% select(hid) %>% unique() %>% dim())[1]
 snp_occurrence_plot <- ggplot(known_snps, aes(log10(snp_occurrence / num_haps), fill = known_snp)) +
   geom_density(position = 'identity', alpha = 0.8) +
   xlab("percentage of haplotypes snp found in (log10)") +
@@ -238,10 +234,6 @@ snp_frequencies <- cbind(vcf, snpFreq=rowMeans(hap_mat)) %>%
     bool > 0,
     grepl('pfama1', haplotype)
   )
-
-(snp_frequencies %>% select(POS, snpFreq) %>% unique())$snpFreq %>% hist()
-
-snp_frequencies %>% group_by(snpFreq) %>% summarise(c = mean(snpFreq))
 
 # gather haplotype relevant statistics
 haploStats <- prism2 %>%
