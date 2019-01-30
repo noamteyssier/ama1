@@ -9,9 +9,10 @@ import sys
 from scipy.optimize import minimize
 
 class Timeline:
-    def __init__(self, df):
-        # self.df = pd.read_csv(fn, sep = '\t')
+    def __init__(self, df, model):
         self.df = df
+        self.model = 'ms' if not model else model
+
         self.cid_arr = None
         self.timelines = []
         self.triplets = []
@@ -89,12 +90,21 @@ class Timeline:
         """return unique triplet counts used for likelihood calculations"""
         return self.counts
 
-    def fit_MS(self):
+    def __fit_MS__(self):
         """optimize M and S fit linearly"""
         theta = np.random.rand(2)
         return minimize(
             self.__calculate_logLikelihood__, theta, method = 'Nelder-Mead'
         )
+
+    def fit(self):
+        """handles different models"""
+        if self.model == 'ms':
+            return self.__fit_MS__()
+        elif self.model == 'aq':
+            return "model in production"
+        else:
+            return "ERROR : model not recognized \n options are : ms / aq"
 
     def __parameter_limit__(self, param):
         """set bounds of parameter between 1 and 0"""
@@ -155,7 +165,7 @@ def get_args():
     p = argparse.ArgumentParser()
     p.add_argument("-i", '--seekdeep_input', required=True, help = '.tsv output of seekdeep')
     p.add_argument('-c', '--cohort_meta', required=True, help = '.dta statabase13 meta')
-    p.add_argument('-m', '--model', help = 'model to use [simple, aq]')
+    p.add_argument('-m', '--model', help = 'model to use [ms, aq]')
     args = p.parse_args()
 
     return args
@@ -163,8 +173,8 @@ def get_args():
 def main():
     args = get_args()
     df = prepare_df(args.seekdeep_input, args.cohort_meta)
-    p = Timeline(df)
-    fit = p.fit_MS()
+    p = Timeline(df, model=args.model)
+    fit = p.fit()
     print(fit)
 
 
