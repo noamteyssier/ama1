@@ -2,14 +2,16 @@
 
 import pandas as pd
 import numpy as np
+import argparse
 import os
 import sys
 
 from scipy.optimize import minimize
 
 class Timeline:
-    def __init__(self, fn):
-        self.df = pd.read_csv(fn, sep = '\t')
+    def __init__(self, df):
+        # self.df = pd.read_csv(fn, sep = '\t')
+        self.df = df
         self.cid_arr = None
         self.timelines = []
         self.triplets = []
@@ -125,17 +127,46 @@ class Timeline:
 
         return (-1 * log_likelihood)
 
+def parseSeekDeep(sd_fn):
+    """parses seekdeep output and returns relevant columns"""
+    df = pd.read_csv(sd_fn, sep = "\t")
+    df = df[df['s_Sample'].str.contains('ctrl|neg', regex=True) == False]
+    df = df[['s_Sample','h_popUID', 'c_AveragedFrac']]
+    df['date'] = df.apply(lambda x : pd.to_datetime('-'.join(x['s_Sample'].split('-')[:-1])), axis=1)
+    df['cohortid'] = df.apply(lambda x : int(x['s_Sample'].split('-')[-1]), axis=1)
+    return df
 
+def parseMeta(cm_fn):
+    """parses statabase13 and returns relevant columns"""
+    df = pd.read_stata(cm_fn)
+    df = df[['cohortid', 'date', 'ageyrs', 'qpcr']]
+    return df
 
+def prepare_df(sd_fn, cm_fn):
+    """handles preparing dataframe for timeline processing"""
+    sd = parseSeekDeep(sd_fn)
+    cm = parseMeta(cm_fn)
+    merged = sd.merge(cm, how='inner')
+    merged['hap_qpcr'] = merged.apply(lambda x : x['c_AveragedFrac'] * x['qpcr'], axis = 1)
+    return merged[['cohortid', 'date', 'h_popUID', 'hap_qpcr', 'ageyrs']]
 
+def get_args():
+    """handles arguments, returns args"""
+    p = argparse.ArgumentParser()
+    p.add_argument("-i", '--seekdeep_input', required=True, help = '.tsv output of seekdeep')
+    p.add_argument('-c', '--cohort_meta', required=True, help = '.dta statabase13 meta')
+    p.add_argument('-m', '--model', help = 'model to use [simple, aq]')
+    args = p.parse_args()
 
-
+    return args
 
 def main():
-    os.chdir('/home/noam/bin/ama1/prism2')
-    p = Timeline("data/prism2_timeline.tab")
+    args = get_args()
+    df = prepare_df(args.seekdeep_input, args.cohort_meta)
+    p = Timeline(df)
     fit = p.fit_MS()
     print(fit)
+
 
 if __name__ == '__main__':
     # np.random.seed(42)
