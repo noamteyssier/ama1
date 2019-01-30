@@ -481,6 +481,12 @@ ggsave("plots/haplodrop.png", haplodrop, width = 25, height = 12)
 # Creating Haplotype Infection Event Tables #
 #############################################
 
-df <- prism2 %>%
-  select(date, cohortid, h_popUID, hap_qpcr)
+c_meta <- cohort_meta %>%
+  select(cohortid, date, qpcr, ageyrs) %>%
+  mutate(cohortid = as.character(cohortid))
+
+prism2 %>%
+  inner_join(c_meta, by = c('cohortid', 'date'))
+
+
 write_tsv(df, "data/prism2_timeline.tab")
