@@ -17,7 +17,10 @@ class HaplotypeSet:
         self.sdo = pd.DataFrame()
         self.dist = pd.DataFrame()
         self.vcf = pd.DataFrame()
+        self.sdb = pd.DataFrame()
         self.filtered_df = pd.DataFrame()
+
+        self.sdb_offset = 1294307 # offset for 3D7 genome and AMA1 position
 
         self.available_filters = {
             'lfh' : self.__filter_lfh__,
@@ -83,8 +86,10 @@ class HaplotypeSet:
     def __check_output_filename__(self):
         """assigns default stdout if filename is not given"""
         self.output_filename = self.output_filename if self.output_filename != None else sys.stdout
-    def __prepare_haplotype_dataframe(self):
-        pass
+    def __check_snp_database__(self):
+        """confirms that snp database is present for known snp searching filtering methods"""
+        if 'u' in self.filter_method:
+            assert self.sdb, "\nFiltering Method '{0}' requires a snp database to cross reference position"
     def __process_vcf__(self):
         """prepare vcf dataframe for downstream processing"""
         # convert from wide to long
@@ -117,6 +122,11 @@ class HaplotypeSet:
             agg({'h_frequency': 'mean'}).\
             rename(index=str, columns={'h_frequency' : 's_frequency'}).\
             merge(self.vcf, on = 'POS', how='inner')
+    def __process_snp_database__(self):
+        """load in snp database, split snp position, and calculate relative position to amplicons"""
+        self.sdb = pd.read_csv(self.sdb, sep="\t")
+        self.sdb['relative_snp_position'] = self.sdb.\
+            apply(lambda x : int(x['SNP_Id'].split('.')[-1]) - self.sdb_offset, axis = 1)
     def __run_filter__(self):
         """call appropriate filter using dictionary"""
         self.available_filters[self.filter_method]()
@@ -130,7 +140,13 @@ class HaplotypeSet:
         self.filtered_df = self.sdo[self.sdo.h_popUID.isin(passing_haplotypes)]
     def __filter_lfhu__(self):
         """filter haplotypes with low frequency population frequency AND unknown snps"""
-        pass
+        self.__process_snp_database__()
+        self.__process_vcf__()
+        self.__filter_lfh__()
+        unknown_snp_haplotypes = self.vcf[
+            ~self.vcf.POS.isin(self.sdb.relative_snp_position)
+            ].hid
+        self.filtered_df = self.filtered_df[~self.filtered_df.h_popUID.isin(unknown_snp_haplotypes)]
     def __filter_lfsu__(self):
         """filter haplotypes with low frequency snps AND unknown snps"""
         pass
@@ -140,15 +156,17 @@ class HaplotypeSet:
     def __print_df__(self):
         """write dataframe as TSV"""
         self.filtered_df.to_csv(self.output_filename, sep = "\t", index = False)
-    def filter(self, filter_method, frequency, output_filename):
+    def filter(self, filter_method, frequency, output_filename, snp_database):
         """error checking and call appropriate filter method"""
         self.filter_method = filter_method
         self.frequency = frequency
         self.output_filename = output_filename
+        self.sdb = snp_database
 
         self.__check_filter__()
         self.__check_frequency__()
         self.__check_output_filename__()
+        self.__check_snp_database__()
 
         self.__run_filter__()
         self.__print_df__()
@@ -168,6 +186,9 @@ def get_args():
         help="tab delim file of haplotypes passing filter (default = stdout)")
     p.add_argument('-c', '--snp_occurrence', required=False,
         help="number of occurrences a snp must have to be considered (default = 0)")
+    p.add_argument('-d', '--snp_database', required=False,
+        help="snp database to use for unknown snp calls (required for LFHU and LFSU filtering)"
+    )
     args = p.parse_args()
 
     return args
@@ -175,7 +196,12 @@ def get_args():
 def main():
     args = get_args()
     h = HaplotypeSet(args.seekdeep_output, args.fasta)
-    h.filter(args.filter_method, args.frequency, args.output_filename)
+    h.filter(
+        args.filter_method,
+        args.frequency,
+        args.output_filename,
+        args.snp_database
+        )
 
 
 
