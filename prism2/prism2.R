@@ -8,7 +8,7 @@ setwd("~/bin/ama1/prism2")
 
 cohort_meta <- read.dta13("stata/allVisits.dta")
 seekdeep <- read_tsv("data/filtered_prism2.tab.txt")
-vcf <- read_tsv("seq_data/filtered_pfama1.vcf")
+vcf <- read_tsv("seq_data/filtered_pfama1.vcf", skip = 3)
 snpdist <- read_tsv("seq_data/filtered_snpDist.tab")
 snpdb <- read_tsv("data/ama1_snpInfo.db.tab")
 readcounts <- read_tsv("data/readCounts.tab")
@@ -148,7 +148,7 @@ ggsave("plots/control_bars.png", control_bars)
 ##########################
 # Haplotype VCF Analysis #
 ##########################
-
+colnames(vcf)[1] <- 'CHROM' # removing commenting hashtag for colnames 
 longform_vcf <- vcf %>%
   select(-ID, -REF, -ALT, -QUAL, -FILTER, -INFO, -FORMAT) %>%
   gather('sample', 'snp', -CHROM, -POS) %>%
