@@ -85,19 +85,38 @@ class HaplotypeSet:
         self.output_filename = self.output_filename if self.output_filename != None else sys.stdout
     def __prepare_haplotype_dataframe(self):
         pass
-    def filter(self, filter_method, frequency, output_filename):
-        """error checking and call appropriate filter method"""
-        self.filter_method = filter_method
-        self.frequency = frequency
-        self.output_filename = output_filename
+    def __process_vcf__(self):
+        """prepare vcf dataframe for downstream processing"""
+        # convert from wide to long
+        self.vcf = pd.melt(
+                self.vcf,
+                id_vars=['POS'],
+                value_vars=self.vcf.columns[1:],
+                var_name="haplotype",
+                value_name='snp_bool'
+            )
 
-        self.__check_filter__()
-        self.__check_frequency__()
-        self.__check_output_filename__()
+        # filter out non snp~haplotypes
+        self.vcf = self.vcf[self.vcf.snp_bool > 0]
 
-        self.__run_filter__()
-        self.__print_df__()
+        # convert values greater than 1 to one (not sure why snp-sites gives these)
+        self.vcf.snp_bool.replace("[0-9]",1, inplace=True, regex=True)
 
+        # separate haplotype frequency from id
+        self.vcf[['hid', 'h_frequency']] = self.vcf.\
+            apply(
+                lambda x : x['haplotype'].split('_f'), axis = 1, result_type='expand'
+            )
+
+        # convert frequency to float
+        self.vcf['h_frequency'] = self.vcf['h_frequency'].astype('float')
+
+        # calculate snp frequency as mean of haplotype frequency containing it
+        self.vcf = self.vcf.\
+            groupby('POS', as_index=False).\
+            agg({'h_frequency': 'mean'}).\
+            rename(index=str, columns={'h_frequency' : 's_frequency'}).\
+            merge(self.vcf, on = 'POS', how='inner')
     def __run_filter__(self):
         """call appropriate filter using dictionary"""
         self.available_filters[self.filter_method]()
@@ -106,7 +125,9 @@ class HaplotypeSet:
         self.filtered_df = self.sdo[self.sdo['h_SampFrac'] >= self.frequency]
     def __filter_lfs__(self):
         """filter haplotypes with low frequency snps"""
-        pass
+        self.__process_vcf__()
+        passing_haplotypes = self.vcf[self.vcf.s_frequency >= self.frequency].hid.unique().tolist()
+        self.filtered_df = self.sdo[self.sdo.h_popUID.isin(passing_haplotypes)]
     def __filter_lfhu__(self):
         """filter haplotypes with low frequency population frequency AND unknown snps"""
         pass
@@ -119,6 +140,18 @@ class HaplotypeSet:
     def __print_df__(self):
         """write dataframe as TSV"""
         self.filtered_df.to_csv(self.output_filename, sep = "\t", index = False)
+    def filter(self, filter_method, frequency, output_filename):
+        """error checking and call appropriate filter method"""
+        self.filter_method = filter_method
+        self.frequency = frequency
+        self.output_filename = output_filename
+
+        self.__check_filter__()
+        self.__check_frequency__()
+        self.__check_output_filename__()
+
+        self.__run_filter__()
+        self.__print_df__()
 
 def get_args():
     """argument handler"""
@@ -133,6 +166,8 @@ def get_args():
         help="frequency to use as threshold as float (default = 0.05)")
     p.add_argument('-o', '--output_filename', required=False,
         help="tab delim file of haplotypes passing filter (default = stdout)")
+    p.add_argument('-c', '--snp_occurrence', required=False,
+        help="number of occurrences a snp must have to be considered (default = 0)")
     args = p.parse_args()
 
     return args
