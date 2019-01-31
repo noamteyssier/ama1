@@ -7,6 +7,7 @@ import argparse
 import matplotlib
 import matplotlib.pyplot as plt
 from ggplot import *
+import sys
 
 class HaplotypeSet:
     def __init__(self, sdo_fn, fasta_fn):
@@ -68,32 +69,41 @@ class HaplotypeSet:
         # keep only positions and haplotypes
         self.vcf = pd.read_csv(self._vcf_fn, sep="\t", skiprows=3).\
             drop(columns = ["#CHROM", "ID", "REF", "ALT", "QUAL", "FILTER","INFO","FORMAT"])
-    def __check_filter__(self, filter_method):
+    def __check_filter__(self):
         """assertion to confirm filter method is supported"""
-        assert filter_method in self.available_filters, \
+        assert self.filter_method in self.available_filters, \
         "\nFilter Method '{0}' not supported \nMethods Supported : {1}".\
-        format(filter_method, ' '.join(self.available_filters))
-    def __check_frequency__(self, frequency):
+        format(self.filter_method, ' '.join(self.available_filters))
+    def __check_frequency__(self):
         """assertion to check frequency is a float between 0 and 1"""
-        assert float(frequency) > 0 and float(frequency) < 1, \
+        self.frequency = float(self.frequency) if self.frequency != None else 0.05
+        assert self.frequency > 0 and self.frequency < 1, \
             "\nFrequency must be a float between 0 and 1 (user provided {})".\
-            format(frequency)
+            format(self.frequency)
+    def __check_output_filename__(self):
+        """assigns default stdout if filename is not given"""
+        self.output_filename = self.output_filename if self.output_filename != None else sys.stdout
     def __prepare_haplotype_dataframe(self):
         pass
-    def filter(self, filter_method, frequency):
+    def filter(self, filter_method, frequency, output_filename):
         """error checking and call appropriate filter method"""
-        self.__check_filter__(filter_method)
-        self.__check_frequency__(frequency)
+        self.filter_method = filter_method
+        self.frequency = frequency
+        self.output_filename = output_filename
 
+        self.__check_filter__()
+        self.__check_frequency__()
+        self.__check_output_filename__()
 
-        # call method through dictionary
-        self.available_filters[filter_method](float(frequency))
-    def __filter_lfh__(self, frequency):
+        self.__run_filter__()
+        self.__print_df__()
+
+    def __run_filter__(self):
+        """call appropriate filter using dictionary"""
+        self.available_filters[self.filter_method]()
+    def __filter_lfh__(self):
         """filter haplotypes with low frequency haplotype (population frequency)"""
-        self.filtered_df = self.sdo[self.sdo['h_SampFrac'] >= frequency]
-        # g = ggplot(self.sdo, aes(x = 'h_SampFrac')) + geom_density()
-        # print(g)
-        pass
+        self.filtered_df = self.sdo[self.sdo['h_SampFrac'] >= self.frequency]
     def __filter_lfs__(self):
         """filter haplotypes with low frequency snps"""
         pass
@@ -106,6 +116,9 @@ class HaplotypeSet:
     def __filter_ooslf__(self):
         """filter haplotypes with conditions : one off haplotype in sample AND low frequency"""
         pass
+    def __print_df__(self):
+        """write dataframe as TSV"""
+        self.filtered_df.to_csv(self.output_filename, sep = "\t", index = False)
 
 def get_args():
     """argument handler"""
@@ -118,6 +131,8 @@ def get_args():
         help="type of filter method [lfh, lfs, lfhu, lfsu, ooslf]")
     p.add_argument('-f', '--frequency', required=False,
         help="frequency to use as threshold as float (default = 0.05)")
+    p.add_argument('-o', '--output_filename', required=False,
+        help="tab delim file of haplotypes passing filter (default = stdout)")
     args = p.parse_args()
 
     return args
@@ -125,7 +140,7 @@ def get_args():
 def main():
     args = get_args()
     h = HaplotypeSet(args.seekdeep_output, args.fasta)
-    h.filter(args.filter_method, args.frequency)
+    h.filter(args.filter_method, args.frequency, args.output_filename)
 
 
 
