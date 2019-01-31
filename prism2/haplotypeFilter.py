@@ -14,17 +14,24 @@ class HaplotypeSet:
         self.dist = pd.DataFrame()
         self.vcf = pd.DataFrame()
 
+        self.available_filters = {
+            'lfh' : self.__filter_lfh__,
+            'lfs' :  self.__filter_lfs__,
+            'lfhu' : self.__filter_lfhu__,
+            'lfsu' : self.__filter_lfsu__,
+            'ooslf': self.__filter_ooslf__
+        }
+
         self.__generate_resources__()
     def __generate_resources__(self):
         """create : alignment, distance, and vcf"""
-        #
         self._aln_fn = self.fasta_fn.replace(".fasta", ".aln")
         self._dists_fn = self._aln_fn.replace(".aln", ".dist")
         self._vcf_fn = self._aln_fn.replace(".aln", ".vcf")
 
-        self.__create_alignment__()
-        self.__create_snp_dist__()
-        self.__create_snp_vcf__()
+        # self.__create_alignment__()
+        # self.__create_snp_dist__()
+        # self.__create_snp_vcf__()
         self.__create_dataframes__()
     def __create_alignment__(self):
         """align fasta using clustal omega"""
@@ -57,20 +64,49 @@ class HaplotypeSet:
         # keep only positions and haplotypes
         self.vcf = pd.read_csv(self._vcf_fn, sep="\t", skiprows=3).\
             drop(columns = ["#CHROM", "ID", "REF", "ALT", "QUAL", "FILTER","INFO","FORMAT"])
-
-
+    def __check_filter__(self, filter_method):
+        """assertion to confirm filter method is supported"""
+        assert filter_method in self.available_filters, \
+        "\nFilter Method '{0}' not supported \nMethods Supported : {1}".\
+        format(filter_method, ' '.join(self.available_filters))
+    def filter(self, filter_method):
+        self.__check_filter__(filter_method)
+        self.available_filters[filter_method]()
+    def __filter_lfh__(self):
+        """filter haplotypes with low frequency haplotype (population frequency)"""
+        pass
+    def __filter_lfs__(self):
+        """filter haplotypes with low frequency snps"""
+        pass
+    def __filter_lfhu__(self):
+        """filter haplotypes with low frequency population frequency AND unknown snps"""
+        pass
+    def __filter_lfsu__(self):
+        """filter haplotypes with low frequency snps AND unknown snps"""
+        pass
+    def __filter_ooslf__(self):
+        """filter haplotypes with conditions : one off haplotype in sample AND low frequency"""
+        pass
 
 def get_args():
     """argument handler"""
     p = argparse.ArgumentParser()
-    p.add_argument("-i", "--seekdeep_output", help = "tab folder from seekdeep output", required=True)
-    p.add_argument("-f", "--fasta", help = "fasta from seekdeep output", required=True)
+    p.add_argument("-i", "--fasta", required=True,
+        help="fasta from seekdeep output")
+    p.add_argument("-s", "--seekdeep_output", required=True,
+        help="tab folder from seekdeep output")
+    p.add_argument("-m", '--filter_method', required=True,
+        help="type of filter method [lfh, lfs, lfhu, lfsu, ooslf]")
+    p.add_argument('-f', '--frequency', required=False,
+        help="frequency to use as threshold as float (default = 0.05)")
     args = p.parse_args()
+
     return args
 
 def main():
     args = get_args()
     h = HaplotypeSet(args.seekdeep_output, args.fasta)
+    h.filter(args.filter_method)
 
 
 
