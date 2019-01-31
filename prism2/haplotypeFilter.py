@@ -4,6 +4,9 @@ import subprocess as sp
 import pandas as pd
 import numpy as np
 import argparse
+import matplotlib
+import matplotlib.pyplot as plt
+from ggplot import *
 
 class HaplotypeSet:
     def __init__(self, sdo_fn, fasta_fn):
@@ -13,6 +16,7 @@ class HaplotypeSet:
         self.sdo = pd.DataFrame()
         self.dist = pd.DataFrame()
         self.vcf = pd.DataFrame()
+        self.filtered_df = pd.DataFrame()
 
         self.available_filters = {
             'lfh' : self.__filter_lfh__,
@@ -69,11 +73,26 @@ class HaplotypeSet:
         assert filter_method in self.available_filters, \
         "\nFilter Method '{0}' not supported \nMethods Supported : {1}".\
         format(filter_method, ' '.join(self.available_filters))
-    def filter(self, filter_method):
+    def __check_frequency__(self, frequency):
+        """assertion to check frequency is a float between 0 and 1"""
+        assert float(frequency) > 0 and float(frequency) < 1, \
+            "\nFrequency must be a float between 0 and 1 (user provided {})".\
+            format(frequency)
+    def __prepare_haplotype_dataframe(self):
+        pass
+    def filter(self, filter_method, frequency):
+        """error checking and call appropriate filter method"""
         self.__check_filter__(filter_method)
-        self.available_filters[filter_method]()
-    def __filter_lfh__(self):
+        self.__check_frequency__(frequency)
+
+
+        # call method through dictionary
+        self.available_filters[filter_method](float(frequency))
+    def __filter_lfh__(self, frequency):
         """filter haplotypes with low frequency haplotype (population frequency)"""
+        self.filtered_df = self.sdo[self.sdo['h_SampFrac'] >= frequency]
+        # g = ggplot(self.sdo, aes(x = 'h_SampFrac')) + geom_density()
+        # print(g)
         pass
     def __filter_lfs__(self):
         """filter haplotypes with low frequency snps"""
@@ -106,9 +125,10 @@ def get_args():
 def main():
     args = get_args()
     h = HaplotypeSet(args.seekdeep_output, args.fasta)
-    h.filter(args.filter_method)
+    h.filter(args.filter_method, args.frequency)
 
 
 
 if __name__ == '__main__':
+    # plt.show()
     main()
