@@ -127,9 +127,20 @@ class HaplotypeSet:
         self.sdb = pd.read_csv(self.sdb, sep="\t")
         self.sdb['relative_snp_position'] = self.sdb.\
             apply(lambda x : int(x['SNP_Id'].split('.')[-1]) - self.sdb_offset, axis = 1)
+    def __find_known_snps__(self):
+        """identify snps with known positions and return haplotypes snps are found in"""
+        self.known_snp_haplotypes = self.vcf[
+            self.vcf.POS.isin(self.sdb.relative_snp_position)
+            ].hid.unique()
     def __run_filter__(self):
         """call appropriate filter using dictionary"""
         self.available_filters[self.filter_method]()
+    def __filter_unknown__(self, process_vcf=True):
+        """applies filter to keep only haplotypes with known snps"""
+        self.__process_snp_database__()
+        if process_vcf: self.__process_vcf__()
+        self.__find_known_snps__()
+        self.filtered_df = self.filtered_df[self.filtered_df.h_popUID.isin(self.known_snp_haplotypes)]
     def __filter_lfh__(self):
         """filter haplotypes with low frequency haplotype (population frequency)"""
         self.filtered_df = self.sdo[self.sdo['h_SampFrac'] >= self.frequency]
@@ -140,16 +151,12 @@ class HaplotypeSet:
         self.filtered_df = self.sdo[self.sdo.h_popUID.isin(passing_haplotypes)]
     def __filter_lfhu__(self):
         """filter haplotypes with low frequency population frequency AND unknown snps"""
-        self.__process_snp_database__()
-        self.__process_vcf__()
         self.__filter_lfh__()
-        unknown_snp_haplotypes = self.vcf[
-            ~self.vcf.POS.isin(self.sdb.relative_snp_position)
-            ].hid
-        self.filtered_df = self.filtered_df[~self.filtered_df.h_popUID.isin(unknown_snp_haplotypes)]
+        self.__filter_unknown__()
     def __filter_lfsu__(self):
         """filter haplotypes with low frequency snps AND unknown snps"""
-        pass
+        self.__filter_lfs__()
+        self.__filter_unknown__(process_vcf=False)
     def __filter_ooslf__(self):
         """filter haplotypes with conditions : one off haplotype in sample AND low frequency"""
         pass
