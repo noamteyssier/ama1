@@ -20,4 +20,4 @@
 
 ## Plots
 - change color of malaria to red, asymptomatic/qPCR + to blue, asymptomatic/bloodsmear+ to green 
-- ensure that "malria" episodes (coded on plot) match up to actual diagnosed malaria episodes (consider coding this directly from the metadata, there should be a malaria y/n variable)
+- ensure that "malaria" episodes (coded on plot) match up to actual diagnosed malaria episodes (consider coding this directly from the metadata, there should be a malaria y/n variable)
