@@ -8,27 +8,48 @@ import matplotlib
 import matplotlib.pyplot as plt
 from ggplot import *
 import sys
+import itertools
 
 class HaplotypeSet:
     def __init__(self, sdo_fn, fasta_fn):
         self.sdo_fn = sdo_fn
         self.fasta_fn = fasta_fn
 
+        # seekdeep output table
         self.sdo = pd.DataFrame()
+
+        # snp-dists output table
         self.dist = pd.DataFrame()
+
+        # snp-sites vcf output table
         self.vcf = pd.DataFrame()
+
+        # snp-database output table (malariagen)
         self.sdb = pd.DataFrame()
+
+        # processed dataframe after filter is applied
         self.filtered_df = pd.DataFrame()
 
-        self.sdb_offset = 1294307 # offset for 3D7 genome and AMA1 position
+        # dataframe created of haplotype pairs with a distance of one
+        self.OneOff = pd.DataFrame()
 
+        # dataframe created of haplotypes found in the same sample
+        self.SameSample = pd.DataFrame()
+
+        # offset for 3D7 genome and AMA1 position
+        self.sdb_offset = 1294307
+
+        # list of samples found in self.sdo
+        self.samples = []
+
+        # dictionary switch statement
         self.available_filters = {
             'lfh' : self.__filter_lfh__,
             'lfs' :  self.__filter_lfs__,
             'lfhu' : self.__filter_lfhu__,
             'lfsu' : self.__filter_lfsu__,
             'ou' : self.__filter_ou__,
-            'ooslf': self.__filter_ooslf__
+            'ooslfs': self.__filter_ooslfs__
         }
 
         self.__generate_resources__()
@@ -64,7 +85,9 @@ class HaplotypeSet:
         )
     def __create_dataframes__(self):
         """create pandas dataframes and tidy"""
+        # read in seekdeep output table
         self.sdo = pd.read_csv(self.sdo_fn, sep="\t")
+        self.samples = self.sdo.s_Sample.unique().tolist()
 
         # rename version number to h_popUID
         self.dist = pd.read_csv(self._dists_fn, sep="\t").\
@@ -91,6 +114,24 @@ class HaplotypeSet:
         """confirms that snp database is present for known snp searching filtering methods"""
         if 'u' in self.filter_method:
             assert self.sdb, "\nFiltering Method '{0}' requires a snp database to cross reference position"
+    def __NaN_upper_triangular__(self, df, colskip=1):
+        """
+        - convert upper triangular of dataframe to NaN
+            - optional column to skip to exclude and reappend after conversion
+        """
+        skipCol = df.iloc[:, :colskip]
+        triangular_bool = np.tril(
+            np.ones(df.iloc[:, colskip:].shape).astype(np.bool))
+        triangular = df.iloc[:, 1:].where(triangular_bool)
+        triangular.insert(
+            loc = colskip-1,
+            column = skipCol.columns.values[0],
+            value = skipCol
+        )
+        return triangular
+    def __get_samples__(self):
+        """utility function to retrieve sample names"""
+        return self.samples
     def __process_vcf__(self):
         """prepare vcf dataframe for downstream processing"""
         # convert from wide to long
@@ -135,11 +176,49 @@ class HaplotypeSet:
         self.sdb = pd.read_csv(self.sdb, sep="\t")
         self.sdb['relative_snp_position'] = self.sdb.\
             apply(lambda x : int(x['SNP_Id'].split('.')[-1]) - self.sdb_offset, axis = 1)
+    def __process_dists__(self):
+        """process snp-dists output into long format of hid-hid-steps + make OneOff"""
+        # # keep only lower triangular
+        # self.dist = self.__NaN_upper_triangular__(self.dist)
+
+        # melt dataframe for hid-hid-steps
+        self.dist = pd.melt(
+            self.dist,
+            id_vars=['h_popUID'],
+            value_vars=self.dist.columns[1:],
+            var_name="h_popUID2",
+            value_name="steps")
+
+        # only keep pairs with a distance
+        self.dist = self.dist[self.dist.steps > 0]
+
+        # remove population frequency from hid
+        self.dist['h_popUID'] = self.dist.\
+            apply(lambda x : x['h_popUID'].split('_f')[0], axis = 1)
+        self.dist['h_popUID2'] = self.dist.\
+            apply(lambda x : x['h_popUID2'].split('_f')[0], axis = 1)
+
+        # data frame of haplotypes only one off of each other
+        self.OneOff = self.dist[self.dist.steps == 1].rename(columns = {'h_popUID' : 'h_popUID1'})
     def __find_known_snps__(self):
         """identify snps with known positions and return haplotypes snps are found in"""
         self.known_snp_haplotypes = self.vcf[
             self.vcf.POS.isin(self.sdb.relative_snp_position)
             ].hid.unique()
+    def __find_same_sample_pairs__(self):
+        """identify all haplotypes that appear in the same sample (hid~date)"""
+        hap1 = []
+        hap2 = []
+        for i in self.__get_samples__():
+            l = self.sdo[self.sdo.s_Sample == i].h_popUID.tolist()
+            if len(l) > 1:
+                mat = np.array([[i,j] for (i,j) in itertools.combinations(l, r=2)])
+                hap1.append(mat[:,0])
+                hap2.append(mat[:,1])
+        self.SameSample = pd.DataFrame({
+            'h_popUID1' : [item for sublist in hap1 for item in sublist],
+            'h_popUID2' : [item for sublist in hap2 for item in sublist]}
+            )
     def __run_filter__(self):
         """call appropriate filter using dictionary"""
         self.available_filters[self.filter_method]()
@@ -170,8 +249,14 @@ class HaplotypeSet:
         self.__process_vcf__()
         to_filter = self.vcf[self.vcf.s_occurrence == 1].hid.unique()
         self.filtered_df = self.sdo[~self.sdo.h_popUID.isin(to_filter)]
-    def __filter_ooslf__(self):
-        """filter haplotypes with conditions : one off haplotype in sample AND low frequency"""
+    def __filter_ooslfs__(self):
+        """filter haplotypes with conditions : one off haplotype in sample AND low frequency snp"""
+        self.__process_dists__()
+        self.__process_vcf__()
+        self.__find_same_sample_pairs__()
+
+        print(self.OneOff)
+
         pass
     def __print_df__(self):
         """write dataframe as TSV"""
@@ -199,7 +284,7 @@ def get_args():
     p.add_argument("-s", "--seekdeep_output", required=True,
         help="tab folder from seekdeep output")
     p.add_argument("-m", '--filter_method', required=True,
-        help="type of filter method [lfh, lfs, lfhu, lfsu, ou, ooslf]")
+        help="type of filter method [lfh, lfs, lfhu, lfsu, ou, ooslfs]")
     p.add_argument('-f', '--frequency', required=False,
         help="frequency to use as threshold as float (default = 0.05)")
     p.add_argument('-o', '--output_filename', required=False,
@@ -223,5 +308,4 @@ def main():
 
 
 if __name__ == '__main__':
-    # plt.show()
     main()
