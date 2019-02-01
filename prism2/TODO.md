@@ -4,11 +4,13 @@
 - number of chimeras per sample
 - list of everything with zero reads
 
+## snp_frequency
+- sum instead of mean?
+
 ## Haplotype Filtering
 - filter haplotypes with OOSSLF method
   - one off same sample low frequency
-- filter haplotypes with LF method
-  - low frequency
+- filter if snp_occurrence == 1 & unknown
 - compare differences between each method
 
 ## Parameter Optimization
