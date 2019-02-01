@@ -59,9 +59,9 @@ class HaplotypeSet:
         self._dists_fn = self._aln_fn.replace(".aln", ".dist")
         self._vcf_fn = self._aln_fn.replace(".aln", ".vcf")
 
-        # self.__create_alignment__()
-        # self.__create_snp_dist__()
-        # self.__create_snp_vcf__()
+        self.__create_alignment__()
+        self.__create_snp_dist__()
+        self.__create_snp_vcf__()
         self.__create_dataframes__()
     def __create_alignment__(self):
         """align fasta using clustal omega"""
