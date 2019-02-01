@@ -27,6 +27,7 @@ class HaplotypeSet:
             'lfs' :  self.__filter_lfs__,
             'lfhu' : self.__filter_lfhu__,
             'lfsu' : self.__filter_lfsu__,
+            'ou' : self.__filter_ou__,
             'ooslf': self.__filter_ooslf__
         }
 
@@ -120,7 +121,14 @@ class HaplotypeSet:
         self.vcf = self.vcf.\
             groupby('POS', as_index=False).\
             agg({'h_frequency': 'mean'}).\
-            rename(index=str, columns={'h_frequency' : 's_frequency'}).\
+            rename(columns={'h_frequency' : 's_frequency'}).\
+            merge(self.vcf, on = 'POS', how='inner')
+
+        # calculate snp occurrence
+        self.vcf = self.vcf.\
+            groupby('POS', as_index=False).\
+            agg({'h_frequency': 'count'}).\
+            rename(columns={'h_frequency' : 's_occurrence'}).\
             merge(self.vcf, on = 'POS', how='inner')
     def __process_snp_database__(self):
         """load in snp database, split snp position, and calculate relative position to amplicons"""
@@ -157,6 +165,11 @@ class HaplotypeSet:
         """filter haplotypes with low frequency snps AND unknown snps"""
         self.__filter_lfs__()
         self.__filter_unknown__(process_vcf=False)
+    def __filter_ou__(self):
+        """filter if one occurrence and snp is unknown"""
+        self.__process_vcf__()
+        to_filter = self.vcf[self.vcf.s_occurrence == 1].hid.unique()
+        self.filtered_df = self.sdo[~self.sdo.h_popUID.isin(to_filter)]
     def __filter_ooslf__(self):
         """filter haplotypes with conditions : one off haplotype in sample AND low frequency"""
         pass
@@ -186,7 +199,7 @@ def get_args():
     p.add_argument("-s", "--seekdeep_output", required=True,
         help="tab folder from seekdeep output")
     p.add_argument("-m", '--filter_method', required=True,
-        help="type of filter method [lfh, lfs, lfhu, lfsu, ooslf]")
+        help="type of filter method [lfh, lfs, lfhu, lfsu, ou, ooslf]")
     p.add_argument('-f', '--frequency', required=False,
         help="frequency to use as threshold as float (default = 0.05)")
     p.add_argument('-o', '--output_filename', required=False,
@@ -194,12 +207,9 @@ def get_args():
     p.add_argument('-c', '--snp_occurrence', required=False,
         help="number of occurrences a snp must have to be considered (default = 0)")
     p.add_argument('-d', '--snp_database', required=False,
-        help="snp database to use for unknown snp calls (required for LFHU and LFSU filtering)"
-    )
+        help="snp database to use for unknown snp calls (required for LFHU and LFSU filtering)")
     args = p.parse_args()
-
     return args
-
 def main():
     args = get_args()
     h = HaplotypeSet(args.seekdeep_output, args.fasta)
