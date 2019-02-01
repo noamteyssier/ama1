@@ -255,9 +255,14 @@ class HaplotypeSet:
         self.__process_vcf__()
         self.__find_same_sample_pairs__()
 
-        print(self.OneOff)
+        # one off and same sample
+        ooss = self.OneOff.\
+            merge(self.SameSample, how = 'inner').\
+            merge(self.vcf[self.vcf.s_frequency >= self.frequency], how = 'inner', left_on='h_popUID1', right_on='hid').\
+            drop_duplicates()
 
-        pass
+        # apply filter
+        self.filtered_df = self.sdo[self.sdo.h_popUID.isin(ooss.h_popUID1.unique())]
     def __print_df__(self):
         """write dataframe as TSV"""
         self.filtered_df.to_csv(self.output_filename, sep = "\t", index = False)
