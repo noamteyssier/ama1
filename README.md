@@ -1,9 +1,5 @@
-# ama1
-
-## Collection of Scripts and Data for PFAMA1 experiments
-## prism2
+# AMA1
 A collection of scripts used to analyze the sequencing data from PRISM2 ama1 hemi-nested pcr experiments.
-
 
 ## haplotypeFilter
 A script to apply filters on seekdeep output to remove suspicious haplotypes on
@@ -19,13 +15,14 @@ Currently the filters are [lfh, lfs, lfhu, lfsu, ou, ooslfs]
 - ooslfs : one off haplotype in sample and low frequency snp
 
 Frequency is given as a float (ex : 0.05 is 5%)
+
 snp_database is a tab delim file pulled from MalariaGen of known snps for ama1
 
 ```bash
 # example usage
 python3 haplotypeFilter.py \
-  -i seq_data/filtered_pfama1.fasta \
-  -s data/filtered_prism2.tab.txt \
+  -i prism2/seq_data/filtered_pfama1.fasta \
+  -s prism2/data/filtered_prism2.tab.txt \
   -m ooslfs \
   -f 0.05
 ```
