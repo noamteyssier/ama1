@@ -243,10 +243,10 @@ class HaplotypeSet:
 
         # data frame of haplotypes only one off of each other
         self.OneOff = self.dist[self.dist.steps == 1].rename(columns = {'h_popUID' : 'h_popUID1'})
-    def __find_known_snps__(self):
+    def __find_unknown_snps__(self):
         """identify snps with known positions and return haplotypes snps are found in"""
-        self.known_snp_haplotypes = self.vcf[
-            self.vcf.POS.isin(self.sdb.relative_snp_position)
+        self.unknown_snp_haplotypes = self.vcf[
+            ~self.vcf.POS.isin(self.sdb.relative_snp_position)
             ].hid.unique()
     def __find_same_sample_pairs__(self):
         """identify all haplotypes that appear in the same sample (hid~date)"""
@@ -269,16 +269,16 @@ class HaplotypeSet:
         """applies filter to keep only haplotypes with known snps"""
         self.__process_snp_database__()
         if process_vcf: self.__process_vcf__()
-        self.__find_known_snps__()
-        self.filtered_df = self.filtered_df[self.filtered_df.h_popUID.isin(self.known_snp_haplotypes)]
+        self.__find_unknown_snps__()
+        self.filtered_df = self.filtered_df[~self.filtered_df.h_popUID.isin(self.unknown_snp_haplotypes)]
     def __filter_lfh__(self):
         """filter haplotypes with low frequency haplotype (population frequency)"""
         self.filtered_df = self.sdo[self.sdo['h_SampFrac'] >= self.frequency]
     def __filter_lfs__(self):
         """filter haplotypes with low frequency snps"""
         self.__process_vcf__()
-        passing_haplotypes = self.vcf[self.vcf.s_frequency >= self.frequency].hid.unique().tolist()
-        self.filtered_df = self.sdo[self.sdo.h_popUID.isin(passing_haplotypes)]
+        failed_haplotypes = self.vcf[self.vcf.s_frequency < self.frequency].hid.unique().tolist()
+        self.filtered_df = self.sdo[~self.sdo.h_popUID.isin(failed_haplotypes)]
     def __filter_lfhu__(self):
         """filter haplotypes with low frequency population frequency AND unknown snps"""
         self.__filter_lfh__()
