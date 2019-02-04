@@ -11,15 +11,6 @@ class SeekDeepUtils:
     """class for various utilities related to SeekDeep output"""
     def __init__(self):
         self.SDO = pd.DataFrame()
-    def fix_filtered_SDO(self, sdo):
-        """recalculates attributes of SeekDeep output dataframe post-filtering"""
-        self.SDO = sdo
-        if not self.SDO.empty:
-            self.__recalculate_population_fractions__()
-            self.__recalculate_cluster_fractions__()
-            self.__reorder_clusterID__()
-            self.__recalculate_COI__()
-        return self.SDO
     def __recalculate_population_fractions__(self):
         self.SDO = self.SDO.\
             groupby('s_Sample').\
@@ -53,7 +44,15 @@ class SeekDeepUtils:
             merge(self.SDO, how = 'left', on = 's_Sample')
         self.SDO['s_COI'] = self.SDO['new_COI'] + 1
         self.SDO.drop('new_COI', axis = 1, inplace = True)
-
+    def fix_filtered_SDO(self, sdo):
+        """recalculates attributes of SeekDeep output dataframe post-filtering"""
+        self.SDO = sdo
+        if not self.SDO.empty:
+            self.__recalculate_population_fractions__()
+            self.__recalculate_cluster_fractions__()
+            self.__reorder_clusterID__()
+            self.__recalculate_COI__()
+        return self.SDO
 class HaplotypeSet:
     def __init__(self, sdo_fn, fasta_fn):
         self.sdo_fn = sdo_fn
@@ -314,7 +313,7 @@ class HaplotypeSet:
         """error checking and call appropriate filter method"""
         s = SeekDeepUtils()
 
-        self.filter_method = filter_method
+        self.filter_method = filter_method.lower()
         self.frequency = frequency
         self.output_filename = output_filename
         self.sdb = snp_database
@@ -327,16 +326,15 @@ class HaplotypeSet:
         self.__run_filter__()
         self.filtered_df = s.fix_filtered_SDO(self.filtered_df)
         self.__print_df__()
-
 def get_args():
     """argument handler"""
-    p = argparse.ArgumentParser()
+    p = argparse.ArgumentParser(description = 'Filtering Methods for SeekDeep Output', formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("-i", "--fasta", required=True,
-        help="fasta from seekdeep output")
+        help="fasta file from seekdeep output")
     p.add_argument("-s", "--seekdeep_output", required=True,
-        help="tab folder from seekdeep output")
+        help="tab delim file from seekdeep output")
     p.add_argument("-m", '--filter_method', required=True,
-        help="type of filter method [lfh, lfs, lfhu, lfsu, ou, ooslfs]")
+        help="type of filter method to use (case independent) \nlfh : low frequency haplotype in population) \nlfs : low frequency snp in population \nlfhu : lfh + unknown snp \nlfsu : lfs + unknown snp \nou : one snp occurrence and unknown snp \nooslfs : one off haplotype in sample and low frequency snp")
     p.add_argument('-f', '--frequency', required=False,
         help="frequency to use as threshold as float (default = 0.05)")
     p.add_argument('-o', '--output_filename', required=False,
