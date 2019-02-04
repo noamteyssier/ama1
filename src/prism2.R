@@ -148,7 +148,7 @@ ggsave("plots/control_bars.png", control_bars)
 ##########################
 # Haplotype VCF Analysis #
 ##########################
-colnames(vcf)[1] <- 'CHROM' # removing commenting hashtag for colnames 
+colnames(vcf)[1] <- 'CHROM' # removing commenting hashtag for colnames
 longform_vcf <- vcf %>%
   select(-ID, -REF, -ALT, -QUAL, -FILTER, -INFO, -FORMAT) %>%
   gather('sample', 'snp', -CHROM, -POS) %>%
