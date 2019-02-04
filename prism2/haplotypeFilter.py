@@ -3,12 +3,56 @@
 import subprocess as sp
 import pandas as pd
 import numpy as np
-import argparse
-import matplotlib
-import matplotlib.pyplot as plt
-from ggplot import *
-import sys
 import itertools
+import argparse
+import sys
+
+class SeekDeepUtils:
+    """class for various utilities related to SeekDeep output"""
+    def __init__(self):
+        self.SDO = pd.DataFrame()
+    def fix_filtered_SDO(self, sdo):
+        """recalculates attributes of SeekDeep output dataframe post-filtering"""
+        self.SDO = sdo
+        if not self.SDO.empty:
+            self.__recalculate_population_fractions__()
+            self.__recalculate_cluster_fractions__()
+            self.__reorder_clusterID__()
+            self.__recalculate_COI__()
+        return self.SDO
+    def __recalculate_population_fractions__(self):
+        self.SDO = self.SDO.\
+            groupby('s_Sample').\
+            agg({'h_SampFrac' : 'sum'}).\
+            rename(columns={'h_SampFrac' : 'h_SampFracSum'}).\
+            merge(self.SDO, how = 'left', on = 's_Sample')
+        self.SDO['h_SampFrac'] = self.SDO.\
+            apply(lambda x : x.h_SampFrac / x.h_SampFracSum, axis = 1)
+        self.SDO.drop(['h_SampFracSum'], axis = 1, inplace=True)
+    def __recalculate_cluster_fractions__(self):
+        """recalculates cluster averaged fraction in sample"""
+        self.SDO = self.SDO.\
+            groupby('s_Sample').\
+            agg({'c_AveragedFrac' : 'sum'}).\
+            rename(columns={'c_AveragedFrac' : 's_FracSum'}).\
+            merge(self.SDO, how = 'left', on = 's_Sample')
+        self.SDO['c_AveragedFrac'] = self.SDO.\
+            apply(lambda x : x.c_AveragedFrac / x.s_FracSum, axis = 1)
+        self.SDO.drop(['s_FracSum'], axis = 1, inplace=True)
+    def __reorder_clusterID__(self):
+        """recalculates cluster ID number for each sample"""
+        self.SDO['c_clusterID'] = self.SDO.\
+            groupby('s_Sample').\
+            cumcount()
+    def __recalculate_COI__(self):
+        """recalculates complexity of infection for each sample"""
+        self.SDO = self.SDO.\
+            groupby('s_Sample').\
+            agg({'c_clusterID' : 'max'}).\
+            rename(columns = {'c_clusterID' : 'new_COI'}).\
+            merge(self.SDO, how = 'left', on = 's_Sample')
+        self.SDO['s_COI'] = self.SDO['new_COI'] + 1
+        self.SDO.drop('new_COI', axis = 1, inplace = True)
 
 class HaplotypeSet:
     def __init__(self, sdo_fn, fasta_fn):
@@ -268,6 +312,8 @@ class HaplotypeSet:
         self.filtered_df.to_csv(self.output_filename, sep = "\t", index = False)
     def filter(self, filter_method, frequency, output_filename, snp_database):
         """error checking and call appropriate filter method"""
+        s = SeekDeepUtils()
+
         self.filter_method = filter_method
         self.frequency = frequency
         self.output_filename = output_filename
@@ -279,6 +325,7 @@ class HaplotypeSet:
         self.__check_snp_database__()
 
         self.__run_filter__()
+        self.filtered_df = s.fix_filtered_SDO(self.filtered_df)
         self.__print_df__()
 
 def get_args():
