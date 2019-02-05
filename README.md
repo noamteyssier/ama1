@@ -48,9 +48,9 @@ cd src/
 
 
 ## Dependencies
-- python - numpy 
-- python - pandas
-- python - scipy 
+- python - numpy-1.15.4
+- python - pandas-0.24.1
+- python - scipy-1.2.0
 - R - tidyverse
 - R - readstata13
 - R - tidygraph
