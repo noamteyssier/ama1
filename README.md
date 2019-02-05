@@ -61,7 +61,7 @@ cd src/
 
 ```bash
 # command line
-pip3 install numpy pandas scipy --user
+pip install numpy pandas scipy --user
 ```
 ```R
 # in R
