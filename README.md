@@ -48,8 +48,9 @@ cd src/
 
 
 ## Dependencies
-- python - numpy    (pip3 install numpy --user)
-- python - pandas   (pip3 install pandas --user)
+- python - numpy 
+- python - pandas
+- python - scipy 
 - R - tidyverse
 - R - readstata13
 - R - tidygraph
@@ -60,7 +61,7 @@ cd src/
 
 ```bash
 # command line
-pip3 install numpy pandas --user
+pip3 install numpy pandas scipy --user
 ```
 ```R
 # in R
