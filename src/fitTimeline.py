@@ -9,175 +9,174 @@ import sys
 from scipy.optimize import minimize
 
 class Timeline:
-    def __init__(self, df, model):
-        self.df = df
-        self.model = 'ms' if not model else model
+    def __init__(self, sdo_fn, meta_fn):
+        self.sdo_fn = sdo_fn
+        self.meta_fn = meta_fn
+        self.model = None
 
-        self.cid_arr = None
-        self.timelines = []
-        self.triplets = []
-        self.t_hist = {}
-        self.counts = np.array([0, 0, 0]) # L1, L2, L3
+        self.timelines = {}
 
-        self.__pivot_by_cid__()
-        self.__convert_to_triplets__()
-        self.__triplet_hist__()
-        self.__simplify_triplets__()
+        self.__parse_sdo__()
+        self.__parse_meta__()
+        self.__make_timelines__()
+    def __parse_sdo__(self):
+        """parses seekdeep output for relevant columns"""
+        self.sdo = pd.read_csv(self.sdo_fn, sep = "\t")[['s_Sample','h_popUID', 'c_AveragedFrac']]
+        self.sdo = self.sdo[self.sdo['s_Sample'].str.contains('ctrl|neg', regex=True) == False] # keep only samples
 
-    def __pivot_by_cid__(self):
-        """add to list timeline dataframe specific to each cohortid"""
-        self.cid_arr = self.df.cohortid.unique()
-        for c in self.cid_arr:
-            cohort_df = self.df[self.df.cohortid == c]
-            self.timelines.append(
-                cohort_df.pivot(
-                    index = 'h_popUID',
-                    columns = 'date',
-                    values = 'hap_qpcr'
-                    ))
+        # split date and cohortid from s_Sample column
+        self.sdo['date'] = self.sdo.\
+            apply(lambda x : pd.to_datetime('-'.join(x['s_Sample'].split('-')[:-1])), axis=1)
+        self.sdo['cohortid'] = self.sdo.\
+            apply(lambda x : int(x['s_Sample'].split('-')[-1]), axis=1)
+    def __parse_meta__(self):
+        """parses statabase13 for relevant columns"""
+        self.meta = pd.read_stata(self.meta_fn)[['cohortid', 'date', 'ageyrs', 'qpcr', 'visittype', 'malariacat']]
 
-    def __convert_to_triplets__(self):
-        """convert cid~haplotype events into triplet events"""
-        # iterate over each cohortid
-        for cid in self.timelines:
-            cid_hapsteps = []
-            boolArr = np.nan_to_num(cid.values) > 0
-            # iterate over haplotype infections
-            for haplotype in boolArr:
-                hap_steps = []
+        # apply filters for only cid in sampleset and routine visits except for malaria events
+        self.meta = self.meta[self.meta.cohortid.isin(self.sdo.cohortid)]
+        self.meta = self.meta[(self.meta.visittype == 'routine visit') | (self.meta.malariacat == 'Malaria')]
 
-                # if more than 3 events create sliding windows
-                if len(haplotype) > 3:
-                    for i in range(len(haplotype) - 2):
-                        triplet = ''.join(['T' if i == True else 'F' for i in haplotype[i:i+3]])
-                        hap_steps.append(triplet)
+        # create s_Sample column from date and cohortid
+        self.meta['s_Sample'] = self.meta.\
+            apply(lambda x : '-'.join([x.date.strftime('%Y-%m-%d'), str(x.cohortid)]), axis=1)
+    def __make_timelines__(self):
+        """create dictionary of cid : haplotype_timelines"""
+        self.timelines = {c:self.__haplotype_timelines__(c) for c in self.getPatients()} # if c == 3720}
+    def __haplotype_timelines__(self, cid):
+        """create haplotype timelines of all cid~date~haplotype_qpcr_fraction"""
+        p_h_timeline = self.getFullTimeline(cid).\
+            append(self.getHaplotypeTimeline(cid), ignore_index=False).\
+            fillna(value=0)
 
-                # if just 3 then return a triplet
-                elif len(haplotype) == 3:
-                    triplet = ''.join(['T' if i == True else 'F' for i in haplotype])
-                    hap_steps.append(triplet)
+        # patient qpcr values
+        qpcr_values = p_h_timeline.values[0]
 
-                # add haplotpe to cid
-                cid_hapsteps.append(hap_steps)
-
-            # add cid to full set
-            self.triplets.append(cid_hapsteps)
-
-    def __triplet_hist__(self):
-        """count unique triplet types in dataset"""
-        for cid in self.triplets:
-            for hid in cid:
-                for t in hid:
-                    if t not in self.t_hist:
-                        self.t_hist[t] = 0
-                    self.t_hist[t] += 1
-
-    def __simplify_triplets__(self):
-        """simplify triplets for likelihood calculations"""
-        for t in self.t_hist:
-            if t[:2] == 'TT':
-                self.counts[0] += self.t_hist[t]
-            elif t == 'TFT':
-                self.counts[1] += self.t_hist[t]
-            elif t == 'TFF':
-                self.counts[2] += self.t_hist[t]
-
-    def fullTripletCount(self):
-        """return all unique triplet counts"""
-        return self.t_hist
-
-    def tripletCount(self):
-        """return unique triplet counts used for likelihood calculations"""
-        return self.counts
-
-    def __fit_MS__(self):
-        """optimize M and S fit linearly"""
-        theta = np.random.rand(2)
-        return minimize(
-            self.__calculate_logLikelihood__, theta, method = 'Nelder-Mead'
+        # multiply haplotype fractions by qpcr densities
+        h_timeline = p_h_timeline[1:].mul(qpcr_values, axis='columns')
+        return h_timeline
+    def __sliding_window__(self, row, window_size):
+        """return a 2d array of sliding windows for a haplotypes infection events"""
+        mat = np.array(
+            [row.values[i:i+window_size] for i in range(row.values.size-window_size + 1)]
         )
+        return mat
+    def __convert_triplet__(self, arr):
+        """convert qpcr data to string of [TF] for greater/equal to 0"""
+        return ''.join([i[0] for i in (arr > 0).astype(str)])
+    def __fitMS__(self):
+        """
+        fit MS model on triplets (++*, +-+, +--) and estimate :
+            - M = Recovery Probability
+            - S = Sensitivity of Detection
+        """
+        theta = np.random.random(2)
+        triplet_list = [self.__convert_triplet__(i) for i in self.timeline_iter(3)]
 
-    def fit(self):
-        """handles different models"""
-        if self.model == 'ms':
-            return self.__fit_MS__()
-        elif self.model == 'aq':
-            return "model in production"
+        fit = minimize(
+            self.__loglikelihood_MS__, theta, triplet_list, method = 'Nelder-Mead'
+        )
+        return fit.x
+    def __l1__(self, M, S):
+        """ likelihood calculation for ++* """
+        return np.prod(
+                [(1 - M), S]
+        )
+    def __l2__(self, M, S):
+        """ likelihood calculation for +-+ """
+        return np.prod(
+                [(1-M)**2, (1-S), S]
+        )
+    def __l3__(self, M, S):
+        """ likelihood calculation for +-- """
+        return (
+            1 - self.__l2__(M,S) - self.__l1__(M,S)
+        )
+    def __assign_likelihood__(self, triplet, M, S):
+        """calculate appropriate likelihood for triplet or return -1"""
+        if triplet[:2] == 'TT':
+            return self.__l1__(M,S)
+        elif triplet == 'TFT':
+            return self.__l2__(M,S)
+        elif triplet == 'TFF':
+            return self.__l3__(M,S)
         else:
-            return "ERROR : model not recognized \n options are : ms / aq"
+            return -1
+    def __loglikelihood_MS__(self, theta, triplet_list):
+        """calculate log_likelihood for MS triplet model"""
+        M,S = theta
+        vals = np.array([self.__assign_likelihood__(t, M, S) for t in triplet_list])
 
-    def __parameter_limit__(self, param):
-        """set bounds of parameter between 1 and 0"""
-        if param == 1:
-            return param - 1e-5
-        elif param == 0:
-            return param + 1e-5
-        else:
-            return param
+        # remove irrelevant triplets from model
+        vals = vals[vals > -1]
 
-    def __calculate_logLikelihood__(self, theta):
-        """calculate log likelihood as -sum(x_i * log(l_i))"""
+        # set bound on likelihoods between 0 and 1
+        vals[np.where(vals <= 0)] = 1e-6
 
-        m, s = theta
-
-        l1 = self.__parameter_limit__(
-            (1 - m) * s
-            )
-        l2 = self.__parameter_limit__(
-            ((1 - m) ** 2) * (s - s**2)
-            )
-        l3 = (1 - l2 - l1)
-
-        ind_likelihoods = np.array([l1, l2, l3])
-        log_ind_likelihoods = np.log(ind_likelihoods)
-
+        # log array and sum
         log_likelihood = np.sum(
-            log_ind_likelihoods * self.counts
+            np.log(vals)
         )
 
+        # convert to negative to minimize
         return (-1 * log_likelihood)
-
-def parseSeekDeep(sd_fn):
-    """parses seekdeep output and returns relevant columns"""
-    df = pd.read_csv(sd_fn, sep = "\t")
-    df = df[df['s_Sample'].str.contains('ctrl|neg', regex=True) == False]
-    df = df[['s_Sample','h_popUID', 'c_AveragedFrac']]
-    df['date'] = df.apply(lambda x : pd.to_datetime('-'.join(x['s_Sample'].split('-')[:-1])), axis=1)
-    df['cohortid'] = df.apply(lambda x : int(x['s_Sample'].split('-')[-1]), axis=1)
-    return df
-
-def parseMeta(cm_fn):
-    """parses statabase13 and returns relevant columns"""
-    df = pd.read_stata(cm_fn)
-    df = df[['cohortid', 'date', 'ageyrs', 'qpcr']]
-    return df
-
-def prepare_df(sd_fn, cm_fn):
-    """handles preparing dataframe for timeline processing"""
-    sd = parseSeekDeep(sd_fn)
-    cm = parseMeta(cm_fn)
-    merged = sd.merge(cm, how='inner')
-    merged['hap_qpcr'] = merged.apply(lambda x : x['c_AveragedFrac'] * x['qpcr'], axis = 1)
-    return merged[['cohortid', 'date', 'h_popUID', 'hap_qpcr', 'ageyrs']]
-
+    def getPatients(self):
+        """returns a list of unique cohortids found in samples"""
+        return self.meta.cohortid.unique()
+    def getFullTimeline(self, query_cohortid):
+        """return a timeline for a given cohortid of all dates in meta"""
+        return(
+            self.meta[self.meta.cohortid == query_cohortid].\
+            pivot(index = 'cohortid', columns = 'date', values = 'qpcr')
+        )
+    def getHaplotypeTimeline(self, query_cohortid):
+        """return at imeline for a given cohortid of all dates in seekdeep output"""
+        return(
+            self.sdo[self.sdo.cohortid == query_cohortid].\
+            pivot(index = 'h_popUID', columns = 'date', values = 'c_AveragedFrac')
+        )
+    def timeline_iter(self, n):
+        """iterable n-mer sliding window groupings of timelines"""
+        for c in self.timelines:
+            t = self.timelines[c]
+            mat = t.apply(lambda x : self.__sliding_window__(x, n), axis=1)
+            try:
+                a = np.concatenate(mat, axis = 0).reshape(mat.size, mat[0].shape[0], mat[0].shape[1])
+            except IndexError:
+                pass
+            for haplotype in a:
+                for nlet in haplotype:
+                    yield nlet
+    def fit(self, model):
+        """callable method to fit model of choice"""
+        self.model = model
+        return self.__fitMS__()
 def get_args():
     """handles arguments, returns args"""
     p = argparse.ArgumentParser()
-    p.add_argument("-i", '--seekdeep_input', required=True, help = '.tsv output of seekdeep')
-    p.add_argument('-c', '--cohort_meta', required=True, help = '.dta statabase13 meta')
-    p.add_argument('-m', '--model', help = 'model to use [ms, aq]')
+    p.add_argument("-i", '--seekdeep_input', required=True,
+        help = 'output of SeekDeep to fit model on')
+    p.add_argument('-c', '--cohort_meta', required=True,
+        help = '.dta statabase13 meta data for SeekDeep samples')
+    p.add_argument('-m', '--model',
+        help = 'model to use [ms, aq]')
+    p.add_argument('-n', '--event_size', default=3,
+        help = 'event window size to use (default = 3)')
+    p.add_argument('-s', '--seed',
+        help = 'random seed to use')
     args = p.parse_args()
-
+    args.event_size = int(args.event_size)
     return args
+def main(args):
+    if args.seed:
+        np.random.seed(int(args.seed))
 
-def main():
-    args = get_args()
-    df = prepare_df(args.seekdeep_input, args.cohort_meta)
-    p = Timeline(df, model=args.model)
-    fit = p.fit()
-    print(fit)
+    t = Timeline(args.seekdeep_input, args.cohort_meta)
+    M,S = t.fit(args.model)
+    print(M,S)
 
+    ### make density plot of time between breaks in haplotypes
 
 if __name__ == '__main__':
-    # np.random.seed(42)
-    main()
+    args = get_args()
+    main(args)
