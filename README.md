@@ -20,12 +20,31 @@ snp_database is a tab delim file pulled from MalariaGen of known snps for ama1
 
 ```bash
 # example usage
-python3 haplotypeFilter.py \
-  -i prism2/seq_data/filtered_pfama1.fasta \
-  -s prism2/data/filtered_prism2.tab.txt \
+cd src/
+./haplotypeFilter.py \
+  -i ../prism2/seq_data/filtered_pfama1.fasta \
+  -s ../prism2/data/filtered_prism2.tab.txt \
   -m ooslfs \
   -f 0.05
 ```
+
+## fitTimeline
+a script to fit models to estimate probability of recovery and sensitivity of detection on a dataset over triplets of haplotypes and possible sample collection dates. Uses the triplet model described in Smith-Felger (PMID:10450427).
+
+###### Note:
+- takes seekdeep output as input alongside metadata in stata13 format.
+- will filter samples with 'neg' or 'ctrl' in sample name
+- will filter out dates of non-routine visits unless malaria episode was recorded
+
+```bash
+# example usage
+cd src/
+./fitTimeline.py \
+  -i ../prism2/data/filtered_prism2.tab.txt
+  -c ../prism2/stata/allVisits.dta
+  --seed 42
+```
+
 
 
 ## Dependencies
