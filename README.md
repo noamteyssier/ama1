@@ -45,7 +45,18 @@ cd src/
   --seed 42
 ```
 
+## prism2
+An R script to generate visualizations of interest to the project. Names to files are hardcoded into the script so if using filtered dataframes you must change the load in files at the top of the file. Generated plots for unfiltered data are available in prism2/plots.
 
+###### Will Generate:
+  - run summary statistics
+  - read count summaries by categorical density
+  - haplotype fractions for control samples
+  - snp frequency distributions between known/unknown snps
+  - snp frequencies in the poulation
+  - malaria event timelines
+  - cid~haplotype density timelines
+  - haplotype distance network plots 
 
 ## Dependencies
 - python - numpy-1.15.4
