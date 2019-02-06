@@ -9,9 +9,11 @@ import sys
 from scipy.optimize import minimize
 
 class Timeline:
-    def __init__(self, sdo_fn, meta_fn):
+    def __init__(self, sdo_fn, meta_fn, event_size, print_histogram):
         self.sdo_fn = sdo_fn
         self.meta_fn = meta_fn
+        self.event_size = event_size
+        self.print_histogram = print_histogram
         self.model = None
 
         self.timelines = {}
@@ -19,6 +21,7 @@ class Timeline:
         self.__parse_sdo__()
         self.__parse_meta__()
         self.__make_timelines__()
+        self.__print_histogram__()
     def __parse_sdo__(self):
         """parses seekdeep output for relevant columns"""
         self.sdo = pd.read_csv(self.sdo_fn, sep = "\t")[['s_Sample','h_popUID', 'c_AveragedFrac']]
@@ -42,7 +45,7 @@ class Timeline:
             apply(lambda x : '-'.join([x.date.strftime('%Y-%m-%d'), str(x.cohortid)]), axis=1)
     def __make_timelines__(self):
         """create dictionary of cid : haplotype_timelines"""
-        self.timelines = {c:self.__haplotype_timelines__(c) for c in self.getPatients()} # if c == 3720}
+        self.timelines = {c:self.__haplotype_timelines__(c) for c in self.getPatients()}
     def __haplotype_timelines__(self, cid):
         """create haplotype timelines of all cid~date~haplotype_qpcr_fraction"""
         p_h_timeline = self.getFullTimeline(cid).\
@@ -61,7 +64,7 @@ class Timeline:
             [row.values[i:i+window_size] for i in range(row.values.size-window_size + 1)]
         )
         return mat
-    def __convert_triplet__(self, arr):
+    def __convert_nlet__(self, arr):
         """convert qpcr data to string of [TF] for greater/equal to 0"""
         return ''.join([i[0] for i in (arr > 0).astype(str)])
     def __fitMS__(self):
@@ -71,12 +74,14 @@ class Timeline:
             - S = Sensitivity of Detection
         """
         theta = np.random.random(2)
-        triplet_list = [self.__convert_triplet__(i) for i in self.timeline_iter(3)]
+        triplet_list = [self.__convert_nlet__(i) for i in self.timeline_iter(3)]
 
-        fit = minimize(
+        self.fit_results = minimize(
             self.__loglikelihood_MS__, theta, triplet_list, method = 'Nelder-Mead'
         )
-        return fit.x
+
+        self.__print_fit_results__()
+        return self.fit_results
     def __l1__(self, M, S):
         """ likelihood calculation for ++* """
         return np.prod(
@@ -108,7 +113,7 @@ class Timeline:
         vals = np.array([self.__assign_likelihood__(t, M, S) for t in triplet_list])
 
         # remove irrelevant triplets from model
-        vals = vals[vals > -1]
+        vals = vals[vals != -1]
 
         # set bound on likelihoods between 0 and 1
         vals[np.where(vals <= 0)] = 1e-6
@@ -120,6 +125,25 @@ class Timeline:
 
         # convert to negative to minimize
         return (-1 * log_likelihood)
+    def __print_histogram__(self):
+        """prints histogram of converted nlets and exits if flag is given"""
+        if self.print_histogram:
+            triplet_list = [self.__convert_nlet__(i) for i in self.timeline_iter(n = self.event_size)]
+            hist = {}
+            for t in triplet_list:
+                if t not in hist:
+                    hist[t] = 0
+                hist[t] += 1
+            for t, c in hist.items():
+                print('\t'.join([t,str(c)]))
+            sys.exit()
+    def __print_fit_results__(self):
+        """prints fit results as tab delim"""
+        print(
+            '\t'.join(
+                [str(i) for i in self.fit_results.x]
+            )
+        )
     def getPatients(self):
         """returns a list of unique cohortids found in samples"""
         return self.meta.cohortid.unique()
@@ -164,6 +188,8 @@ def get_args():
         help = 'event window size to use (default = 3)')
     p.add_argument('-s', '--seed',
         help = 'random seed to use')
+    p.add_argument('-p', '--print_histogram', action='store_true',
+        help = 'print histogram of n-lets found and exit')
     args = p.parse_args()
     args.event_size = int(args.event_size)
     return args
@@ -171,9 +197,8 @@ def main(args):
     if args.seed:
         np.random.seed(int(args.seed))
 
-    t = Timeline(args.seekdeep_input, args.cohort_meta)
-    M,S = t.fit(args.model)
-    print(M,S)
+    t = Timeline(args.seekdeep_input, args.cohort_meta, args.event_size, args.print_histogram)
+    t.fit(args.model)
 
     ### make density plot of time between breaks in haplotypes
 
