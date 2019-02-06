@@ -8,10 +8,9 @@
 - sum instead of mean?
 
 ## Haplotype Filtering
-- filter haplotypes with OOSSLF method
-  - one off same sample low frequency
-- filter if snp_occurrence == 1 & unknown
-- compare differences between each method
+- ~~filter haplotypes with OOSSLF method~~
+  - ~~one off same sample low frequency~~
+- ~~filter if snp_occurrence == 1 & unknown~~
 - separate LFH into population and sample frequencies
 - add ooslfh
 - for one off samples don't penalize the higher percentage one off haplotype
@@ -22,7 +21,6 @@
 
 ## Parameter Optimization
 - add qpcr and age as linear parameters to estimate
-  - update prism2.R to write dataframe with qpcr and age as features
 - fit parameters with filtered and unfiltered haplotypes
 
 ## Plots
@@ -30,7 +28,7 @@
 - ensure that "malaria" episodes (coded on plot) match up to actual diagnosed malaria episodes (consider coding this directly from the metadata, there should be a malaria y/n variable)
 
 ## Epi
--generate stats on gap length by haplotype
+- generate stats on gap length by haplotype
 
 ## Meeting Notes
 - check if replicates function properly when one of the pairs has zero reads with SeekDeep
