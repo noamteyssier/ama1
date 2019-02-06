@@ -40,8 +40,8 @@ a script to fit models to estimate probability of recovery and sensitivity of de
 # example usage
 cd src/
 ./fitTimeline.py \
-  -i ../prism2/data/filtered_prism2.tab.txt
-  -c ../prism2/stata/allVisits.dta
+  -i ../prism2/data/filtered_prism2.tab.txt \
+  -c ../prism2/stata/allVisits.dta \
   --seed 42
 ```
 
