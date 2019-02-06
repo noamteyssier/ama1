@@ -134,8 +134,18 @@ class Timeline:
                 if t not in hist:
                     hist[t] = 0
                 hist[t] += 1
+
+            a = []
+            b = []
             for t, c in hist.items():
-                print('\t'.join([t,str(c)]))
+                a.append(t)
+                b.append(c)
+
+            self.pattern_hist = pd.DataFrame({'pattern':a, 'count':b})
+            self.pattern_hist['frequency'] = self.pattern_hist.\
+                apply(lambda x : x['count'] / np.sum(b), axis=1)
+            self.pattern_hist.sort_values(by = 'frequency').to_csv(sys.stdout, sep='\t', index=False)
+            
             sys.exit()
     def __print_fit_results__(self):
         """prints fit results as tab delim"""
