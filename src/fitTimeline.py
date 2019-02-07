@@ -7,6 +7,7 @@ import os
 import sys
 
 from scipy.optimize import minimize
+from scipy.special import expit
 
 class Timeline:
     def __init__(self, sdo_fn, meta_fn, event_size, print_histogram):
@@ -29,7 +30,7 @@ class Timeline:
 
         # split date and cohortid from s_Sample column
         self.sdo['date'] = self.sdo.\
-            apply(lambda x : pd.to_datetime('-'.join(x['s_Sample'].split('-')[:-1])), axis=1)
+            apply(lambda x : '-'.join(x['s_Sample'].split('-')[:-1]), axis=1)
         self.sdo['cohortid'] = self.sdo.\
             apply(lambda x : int(x['s_Sample'].split('-')[-1]), axis=1)
     def __parse_meta__(self):
@@ -40,18 +41,20 @@ class Timeline:
         self.meta = self.meta[self.meta.cohortid.isin(self.sdo.cohortid)]
         self.meta = self.meta[(self.meta.visittype == 'routine visit') | (self.meta.malariacat == 'Malaria')]
 
+        self.meta['date'] = self.meta.\
+            apply(lambda x : x.date.strftime('%Y-%m-%d'), axis = 1)
+
         # create s_Sample column from date and cohortid
         self.meta['s_Sample'] = self.meta.\
-            apply(lambda x : '-'.join([x.date.strftime('%Y-%m-%d'), str(x.cohortid)]), axis=1)
+            apply(lambda x : '-'.join([x.date, str(x.cohortid)]), axis=1)
     def __make_timelines__(self):
         """create dictionary of cid : haplotype_timelines"""
         self.timelines = {c:self.__haplotype_timelines__(c) for c in self.getPatients()}
     def __haplotype_timelines__(self, cid):
         """create haplotype timelines of all cid~date~haplotype_qpcr_fraction"""
         p_h_timeline = self.getFullTimeline(cid).\
-            append(self.getHaplotypeTimeline(cid), ignore_index=False).\
+            append(self.getHaplotypeTimeline(cid), ignore_index=False, sort=False).\
             fillna(value=0)
-
         # patient qpcr values
         qpcr_values = p_h_timeline.values[0]
 
@@ -64,6 +67,18 @@ class Timeline:
             [row.values[i:i+window_size] for i in range(row.values.size-window_size + 1)]
         )
         return mat
+    def __age_qpcr_iter_worker__(self, row, cid, n):
+        """worker function to split sliding windows and keep age attached"""
+        haplotype_windows = []
+        for i in range(len(row.index) - n + 1):
+            idx = row.index[i:i+n]
+            age = self.meta[
+                (self.meta.date == idx[0]) &    # age at first event
+                (self.meta.cohortid == cid)       # confirm cohortid
+            ].ageyrs.values
+
+            haplotype_windows.append((age, row[idx].values.reshape(n,)))
+        return haplotype_windows
     def __convert_nlet__(self, arr):
         """convert qpcr data to string of [TF] for greater/equal to 0"""
         return ''.join([i[0] for i in (arr > 0).astype(str)])
@@ -77,11 +92,24 @@ class Timeline:
         triplet_list = [self.__convert_nlet__(i) for i in self.timeline_iter(3)]
 
         self.fit_results = minimize(
-            self.__loglikelihood_MS__, theta, triplet_list, method = 'Nelder-Mead'
+            self.__loglikelihood_MS__,
+            theta, triplet_list,
+            method = 'Nelder-Mead'
         )
 
         self.__print_fit_results__()
         return self.fit_results
+    def __fitAQ__(self):
+        theta = np.random.random(4)
+        age_triplet_list = [(age, qpcr) for (age, qpcr) in self.age_qpcr_iter(3)]
+        self.fit_results = minimize(
+            self.__loglikelihood_AQ__,
+            theta, age_triplet_list,
+            method = 'Nelder-Mead'
+        )
+        self.__print_fit_results__()
+        return self.fit_results
+
     def __l1__(self, M, S):
         """ likelihood calculation for ++* """
         return np.prod(
@@ -125,6 +153,31 @@ class Timeline:
 
         # convert to negative to minimize
         return (-1 * log_likelihood)
+    def __loglikelihood_AQ__(self, theta, age_triplet_list):
+        """calculate log_likelihood for AQ triplet model with age + qpcr"""
+        b0, b1, b2, b3 = theta
+        vals = list()
+        for age, qpcr in age_triplet_list:
+            M = expit(b0 + (b1 * age))
+            S = expit(b2 + (b3 * qpcr[0]))
+            triplet = self.__convert_nlet__(qpcr)
+            l = self.__assign_likelihood__(triplet, M, S)
+            vals.append(l)
+        vals = np.array(vals)
+
+        # remove irrelevant triplets from model
+        vals = vals[vals != -1]
+
+        # set bound on likelihoods between 0 and 1
+        vals[np.where(vals <= 0)] = 1e-6
+
+        # log array and sum
+        log_likelihood = np.sum(
+            np.log(vals)
+        )
+
+        # convert to negative to minimize
+        return (-1 * log_likelihood)
     def __print_histogram__(self):
         """prints histogram of converted nlets and exits if flag is given"""
         if self.print_histogram:
@@ -145,7 +198,7 @@ class Timeline:
             self.pattern_hist['frequency'] = self.pattern_hist.\
                 apply(lambda x : x['count'] / np.sum(b), axis=1)
             self.pattern_hist.sort_values(by = 'frequency').to_csv(sys.stdout, sep='\t', index=False)
-            
+
             sys.exit()
     def __print_fit_results__(self):
         """prints fit results as tab delim"""
@@ -181,10 +234,21 @@ class Timeline:
             for haplotype in a:
                 for nlet in haplotype:
                     yield nlet
+    def age_qpcr_iter(self, n):
+        """iterable n-mer sliding window groupings of timelines with ageyrs, qpcr yielded"""
+        for cid in self.timelines:
+            hap_timelines = self.timelines[cid].\
+                apply(lambda x : self.__age_qpcr_iter_worker__(x, cid, n), axis=1)
+            for haplotype in hap_timelines.values:
+                for age, window in haplotype:
+                    yield (age, window)
     def fit(self, model):
         """callable method to fit model of choice"""
         self.model = model
-        return self.__fitMS__()
+        if model == 'ms':
+            return self.__fitMS__()
+        elif model == 'aq':
+            self.__fitAQ__()
 def get_args():
     """handles arguments, returns args"""
     p = argparse.ArgumentParser()
