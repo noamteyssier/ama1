@@ -248,7 +248,7 @@ class Timeline:
         if model == 'ms':
             return self.__fitMS__()
         elif model == 'aq':
-            self.__fitAQ__()
+            return self.__fitAQ__()
 def get_args():
     """handles arguments, returns args"""
     p = argparse.ArgumentParser()
@@ -273,8 +273,6 @@ def main(args):
 
     t = Timeline(args.seekdeep_input, args.cohort_meta, args.event_size, args.print_histogram)
     t.fit(args.model)
-
-    ### make density plot of time between breaks in haplotypes
 
 if __name__ == '__main__':
     args = get_args()
