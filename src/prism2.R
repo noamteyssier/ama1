@@ -7,9 +7,9 @@ setwd("~/bin/ama1/prism2")
 
 
 cohort_meta <- read.dta13("stata/allVisits.dta")
-seekdeep <- read_tsv("data/filtered_prism2.tab.txt")
-vcf <- read_tsv("seq_data/filtered_pfama1.vcf", skip = 3)
-snpdist <- read_tsv("seq_data/filtered_snpDist.tab")
+seekdeep <- read_tsv("full_prism2/pfama1_sampInfo.tab.txt")
+vcf <- read_tsv("full_prism2/pfama1.vcf", skip = 3)
+snpdist <- read_tsv("full_prism2/pfama1.dist")
 snpdb <- read_tsv("data/ama1_snpInfo.db.tab")
 readcounts <- read_tsv("data/readCounts.tab")
 
@@ -30,10 +30,13 @@ controls <- seekdeep %>%
   filter(grepl('ctrl', s_Sample)) %>%
   tidyr::extract(
     s_Sample,
-    into=c('strain_combination', 'concentration'),
-    regex="ctrl-38x-([[:alnum:]a-zA-Z]{3}\\b)-([[:alnum:]a-zA-Z]{2,3}\\b)"
+    into=c('cycles','strain_combination', 'concentration'),
+    regex="ctrl-([[:alnum:]]{3}\\b)-([[:alnum:]]{3}\\b)-([[:alnum:]]{2,3}\\b)"
   ) %>%
-  mutate(concentration = as.numeric(gsub('[kK]', '000', concentration)))
+  mutate(
+    concentration = as.numeric(gsub('[kK]', '000', concentration)),
+    cycles = as.numeric(gsub('x','', cycles))
+  )
 
 #################################
 # comparison of reads by sample #
