@@ -252,6 +252,7 @@ haploStats <- prism2 %>%
 
 # convert snpdist matrix to lower triangular
 snpdist[upper.tri(snpdist)] <- NA
+colnames(snpdist)[1] <- 'haplotype'
 
 # convert triangular distance matrix to longform table
 haploGraph <- snpdist %>%
