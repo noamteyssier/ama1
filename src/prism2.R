@@ -11,7 +11,7 @@ seekdeep <- read_tsv("full_prism2/pfama1_sampInfo.tab.txt")
 vcf <- read_tsv("full_prism2/pfama1.vcf", skip = 3)
 snpdist <- read_tsv("full_prism2/pfama1.dist")
 snpdb <- read_tsv("data/ama1_snpInfo.db.tab")
-readcounts <- read_tsv("data/readCounts.tab")
+readcounts <- read_tsv("full_prism2/readCounts.tab")
 
 # extract metadata for prism2 samples
 prism2 <- seekdeep %>%
