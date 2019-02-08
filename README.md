@@ -28,6 +28,37 @@ cd src/
   -f 0.05
 ```
 
+## OOSSP_filter
+A filter specifically for one-off-same-sample-pairs (OOSSP) with visualizations and filter options.
+Flags include :
+- i : seek deep output filename (optional and defaults to full_prism2)
+- d : fasta distance filename (optional and defaults to full_prism2)
+- m : cohort meta filename (optional and defaults to prism2 statabase)
+- r : the majority/minority SSP percentage ratio (defaults to 50) (can be visualized with --plot_graph before choosing)
+- c : percentage threshold of minority SSP to be used in combination with ratio (defaults to 0.01) (can be visualized with --plot_graph before choosing)
+- f : a flag to filter the SeekDeep dataframe and print to stdout in the same format as input
+- g : a flag to plot the OOSSP ratio v. percentage correlation plot of minority SSP with variable color schemes [fraction, occurence, density]
+  - fraction : colors by percentage of minor haplotype
+  - occurence : colors by occurence of the haplotype in the population
+  - density : colors by log10 qPCR density of samples haplotypes are found in
+
+###### Note:
+Visualization and filtering cannot be done in the same run. Plot first and then filter
+
+```bash
+# example usage to visualize
+cd src
+./OOSSP_filter.py -g fraction
+
+# example usage to filter with defaults
+./OOSSP_filter.py -f
+
+# example usage to filter with ratio of 75 and percentage of 0.02
+./OOSSP_filter.py -f -r 75 -c 0.02
+```
+
+
+
 ## fitTimeline
 a script to fit models to estimate probability of recovery and sensitivity of detection on a dataset over triplets of haplotypes and possible sample collection dates. Uses the triplet model described in Smith-Felger (PMID:10450427).
 
@@ -56,7 +87,7 @@ An R script to generate visualizations of interest to the project. Names to file
   - snp frequencies in the poulation
   - malaria event timelines
   - cid~haplotype density timelines
-  - haplotype distance network plots 
+  - haplotype distance network plots
 
 ## Dependencies
 - python - numpy-1.15.4
@@ -72,7 +103,7 @@ An R script to generate visualizations of interest to the project. Names to file
 
 ```bash
 # command line
-pip install numpy pandas scipy --user
+pip install numpy pandas scipy ggplot --user
 ```
 ```R
 # in R
