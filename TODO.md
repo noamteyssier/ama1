@@ -33,3 +33,4 @@
 ## Meeting Notes
 - check if replicates function properly when one of the pairs has zero reads with SeekDeep
 - check to see if the expected haplotype is found in the 7 strain controls that only show 5
+- scatter plot of haplotype frequencies against haplotype ratios of oneoff haplotypes from each other

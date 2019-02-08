@@ -271,7 +271,7 @@ hg <- as_tbl_graph(haploGraph) %>%
   # node based dplyr
   activate(nodes) %>%
   left_join(haploStats %>% mutate(h_popUID = as.character(h_popUID)), by = c('name' = 'h_popUID')) %>%
-  mutate(shapeBool = ifelse(meanRC < 1000, '<1000rc', '>1000rc')) %>%
+  mutate(shapeBool = ifelse(meanPC <= 0.01, '<1pc', '>1pc')) %>%
   filter(!is.na(shapeBool)) %>%
 
   # edge based dplyr
