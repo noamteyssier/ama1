@@ -296,6 +296,36 @@ class HaplotypeUtils:
                 theme_bw() +\
                 scale_color_manual(values = ['peru', 'red', 'blue', 'green', 'black'])
             print(g)
+    def FilterOOSSP(self, ratio = 50, pc = 0.01):
+        """apply filter of maj/min pc ratio on one-off haplotypes in the same sample"""
+        self.__oossp__()
+
+        # apply filter on oossp dataframe
+        self.to_filter = self.oossp[
+            (self.oossp.h2_fraction < pc) &
+            (self.oossp.majorRatio > ratio)
+        ][['h_popUID1', 'h_popUID2', 's_Sample']]
+
+        # melt dataframe for merging with original sdo
+        self.to_filter = pd.melt(
+            self.to_filter,
+            id_vars = 's_Sample',
+            value_vars = ['h_popUID1', 'h_popUID2'],
+            var_name = 'h_variable',
+            value_name = 'h_popUID')
+
+        # merge sdo, drop rows that are found in oossp to be filtered
+        self.filtered = self.sdo.merge(
+            self.to_filter[self.to_filter.h_variable == 'h_popUID2'],
+            how = 'left')
+        self.filtered = self.filtered[
+            self.filtered.h_variable.isnull()
+        ].drop(columns = ['h_variable', 'cohortid', 'date'])
+
+        # print filtered sdo to stdout in proper format
+        self.filtered.to_csv(sys.stdout, sep = "\t", index=False)
+        
+        return self.filtered
 
 
 def main():
@@ -305,12 +335,19 @@ def main():
     sdo = '/home/noam/bin/ama1/prism2/full_prism2/pfama1_sampInfo.tab.txt'
     meta = '/home/noam/bin/ama1/prism2/stata/allVisits.dta'
 
-    h = HaplotypeUtils(dist, vcf, sdo, meta)
-    h.PlotOOSSP(
-        vlines = [0.01, 0.02, 0.03],
-        hlines = [50, 100],
-        color_type = 'fraction'
-        )
+    h = HaplotypeUtils(
+        dist = dist,
+        vcf = vcf,
+        sdo = sdo,
+        meta = meta
+    )
+
+    h.FilterOOSSP()
+    # h.PlotOOSSP(
+    #     vlines = [0.01, 0.02, 0.03],
+    #     hlines = [50, 100],
+    #     color_type = 'fraction'
+    #     )
 
 
 
