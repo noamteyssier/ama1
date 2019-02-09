@@ -9,7 +9,7 @@ def get_args():
         help = 'SeekDeep Output dataframe to filter')
     p.add_argument('-d', '--dist_fn', default= '../prism2/full_prism2/pfama1.dist',
         help = 'Distance matrix of snps to use to calculate one-offs (snp-dists output)')
-    p.add_argument('-m', '--meta_fn', default= '../prism2/stata/allVisiits.dta',
+    p.add_argument('-m', '--meta_fn', default= '../prism2/stata/allVisits.dta',
         help = 'cohort meta data to use for qpcr colouring (only required for plot : density)')
     p.add_argument('-f', '--filter', action='store_true',
         help = 'perform filter and return filtered dataframe (mutually exclusive with -g flag)')
