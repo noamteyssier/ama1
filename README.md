@@ -28,16 +28,18 @@ cd src/
   -f 0.05
 ```
 
-## OOSSP_filter
+## OOSSP_filter (One Off Same Sample Pairs)
 A filter specifically for one-off-same-sample-pairs (OOSSP) with visualizations and filter options.
 Flags include :
-- i : seek deep output filename (optional and defaults to full_prism2)
-- d : fasta distance filename (optional and defaults to full_prism2)
-- m : cohort meta filename (optional and defaults to prism2 statabase)
-- r : the majority/minority SSP percentage ratio (defaults to 50) (can be visualized with --plot_graph before choosing)
-- c : percentage threshold of minority SSP to be used in combination with ratio (defaults to 0.01) (can be visualized with --plot_graph before choosing)
-- f : a flag to filter the SeekDeep dataframe and print to stdout in the same format as input
-- g : a flag to plot the OOSSP ratio v. percentage correlation plot of minority SSP with variable color schemes [fraction, occurence, density]
+- -i : seek deep output filename (optional and defaults to full_prism2)
+- -d : fasta distance filename (optional and defaults to full_prism2)
+- -m : cohort meta filename (optional and defaults to prism2 statabase)
+- -r : the majority/minority SSP percentage ratio (defaults to 50)
+  - can be visualized with --plot_graph before choosing
+- -c : percentage threshold of minority SSP to be used in combination with ratio (defaults to 0.01)
+  - can be visualized with --plot_graph before choosing
+- -f : a flag to filter the SeekDeep dataframe and print to stdout in the same format as input
+- -g : a flag to plot the OOSSP ratio v. percentage correlation plot of minority SSP with variable color schemes [fraction, occurence, density]
   - fraction : colors by percentage of minor haplotype
   - occurence : colors by occurence of the haplotype in the population
   - density : colors by log10 qPCR density of samples haplotypes are found in
