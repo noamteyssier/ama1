@@ -15,7 +15,7 @@ readcounts <- read_tsv("full_prism2/readCounts.tab")
 
 # extract metadata for prism2 samples
 prism2 <- seekdeep %>%
-  filter(!grepl('ctrl', s_Sample)) %>%
+  filter(!grepl('ctrl|neg', s_Sample)) %>%
   tidyr::extract(
     s_Sample,
     into=c('date', 'cohortid'),
