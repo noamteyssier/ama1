@@ -251,8 +251,6 @@ class HaplotypeUtils:
         return self.same_sample_pairs
     def FindOneOffSameSamplePairs(self, melted=False):
         self.__oossp__()
-        # return self.oossp
-        # self.__melted_oossp__()
         if melted:
             return self.__melted_oossp__()
         else:
@@ -337,6 +335,7 @@ class SeekDeepUtils:
     """class for various utilities related to SeekDeep output"""
     def __init__(self):
         self.sdo = pd.DataFrame()
+        pd.set_option('mode.chained_assignment', None) # remove settingwithcopywarning
     def __recalculate_population_fractions__(self):
         self.sdo = self.sdo.\
             groupby('s_Sample').\
@@ -375,11 +374,59 @@ class SeekDeepUtils:
             merge(self.sdo, how = 'left', on = 's_Sample')
         self.sdo['s_COI'] = self.sdo['new_COI'] + 1
         self.sdo.drop('new_COI', axis = 1, inplace = True)
+    def __generate_timeline__(self, cohortid, boolArray=False):
+        """generate a longform timeline for a given cohortid"""
+        long_cid = self.meta[
+            self.meta.cohortid == cohortid
+        ].merge(
+            self.sdo[['date', 'cohortid', 'h_popUID']],
+            how = 'left'
+        )
+
+        wide_cid = long_cid.pivot(
+            index='h_popUID',
+            columns = 'date',
+            values = 'qpcr')
+
+        wide_cid = wide_cid[~wide_cid.index.isna()]
+        if boolArray:
+            return ~wide_cid.isna()
+        else:
+            return wide_cid
+    def __calculate_skips__(self, row):
+        """calculate skips by subtracting i and i-1 elements of True indices"""
+        i_event = row.values.nonzero()[0]
+        vals = np.array([i_event[i] - i_event[i-1] for i in range(1, len(i_event))])
+        vals = vals[vals > 1]
+        return vals
     def __split_cid_date__(self, row):
         """convert s_Sample to date and cohortid"""
         a = row.s_Sample.split('-')
         date, cid = '-'.join(a[:3]), a[-1]
         return [date, cid]
+    def __prepare_meta__(self, meta):
+        """prepare meta data for usage in timeline generation"""
+        self.meta = meta[['date', 'cohortid', 'qpcr']]
+        self.meta['date'] = self.meta['date'].astype('str')
+        self.meta['cohortid'] = self.meta['cohortid'].astype('str')
+        self.meta.sort_values(by='date', inplace=True)
+        self.meta = self.meta[~self.meta.qpcr.isna()]
+        return self.meta
+    def __prepare_sdo__(self, sdo, controls=False):
+        """prepare seekdeep output dataframe for internal usage"""
+        # keep only patient samples and normalize dataframe
+        if controls == False:
+            self.sdo = sdo[~sdo.s_Sample.str.contains('ctrl|neg')]
+            self.sdo = self.fix_filtered_SDO(self.sdo)
+        else:
+            self.sdo = sdo
+
+        # split cid and date
+        self.sdo[['date', 'cohortid']] = self.sdo.apply(
+            lambda x : self.__split_cid_date__(x),
+            axis = 1, result_type = 'expand')
+
+        return self.sdo
     def fix_filtered_SDO(self, sdo):
         """recalculates attributes of SeekDeep output dataframe post-filtering"""
         self.sdo = sdo
@@ -392,23 +439,13 @@ class SeekDeepUtils:
         return self.sdo
     def Time_Independent_Allele_Frequency(self, sdo, controls=False):
         """calculates allele frequency of each haplotype in population with independent time"""
-        # keep only patient samples and normalize dataframe
-        if controls == False:
-            self.sdo = sdo[~sdo.s_Sample.str.contains('ctrl|neg')]
-            self.sdo = self.fix_filtered_SDO(self.sdo)
-        else:
-            self.sdo = sdo
-
-        # split cid and date
-        self.sdo[['date', 'cid']] = self.sdo.apply(
-            lambda x : self.__split_cid_date__(x),
-            axis = 1, result_type = 'expand')
+        self.__prepare_sdo__(sdo, controls)
 
         # initialize dataframe to return
         a_freq = self.sdo[['h_popUID']].drop_duplicates()
 
         # select h_popUID + cid and drop duplicates created by dates
-        hapCounts = self.sdo[['h_popUID', 'cid']].\
+        hapCounts = self.sdo[['h_popUID', 'cohortid']].\
             drop_duplicates().\
             h_popUID.\
             value_counts()
@@ -421,3 +458,13 @@ class SeekDeepUtils:
             lambda x : x.h_Count / hapCountsTotal, axis = 1)
 
         return a_freq
+    def Haplotype_Skips(self, sdo, meta, controls=False):
+        """returns an array of the skips found per cid~haplotype across dates"""
+        self.__prepare_sdo__(sdo, controls)
+        self.__prepare_meta__(meta)
+
+        timelines = [self.__generate_timeline__(c, boolArray=True) for c in self.sdo.cohortid.unique()]
+        vals = pd.concat(
+            [t.apply(lambda x : self.__calculate_skips__(x), axis = 1) for t in timelines])
+        vals = np.hstack(vals.values) - 1
+        return vals
