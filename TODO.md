@@ -13,14 +13,14 @@
 - ~~filter if snp_occurrence == 1 & unknown~~
 - separate LFH into population and sample frequencies
 - add ooslfh
-- for one off samples don't penalize the higher percentage one off haplotype
-    - in case where both are under threshold, keep top one
+- ~~for one off samples don't penalize the higher percentage one off haplotype~~
+    - ~~in case where both are under threshold, keep top one~~
 - create flags to validate haplotypes and check to see if filtering excludes them
 - for haplotype in population use occurence instead of read fraction
 - separate flags for haplotype filtering
 
 ## Parameter Optimization
-- add qpcr and age as linear parameters to estimate
+- ~~add qpcr and age as linear parameters to estimate~~
 - fit parameters with filtered and unfiltered haplotypes
 
 ## Plots
@@ -33,4 +33,4 @@
 ## Meeting Notes
 - check if replicates function properly when one of the pairs has zero reads with SeekDeep
 - check to see if the expected haplotype is found in the 7 strain controls that only show 5
-- scatter plot of haplotype frequencies against haplotype ratios of oneoff haplotypes from each other
+- ~~scatter plot of haplotype frequencies against haplotype ratios of oneoff haplotypes from each other~~
