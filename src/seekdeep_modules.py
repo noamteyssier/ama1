@@ -259,7 +259,7 @@ class HaplotypeUtils:
             return self.oossp
     def PlotOOSSP(self, vlines, hlines, color_type):
         self.__oossp__()
-        
+
         if not color_type:
             color_type == 'fraction'
 
@@ -336,52 +336,88 @@ class HaplotypeUtils:
 class SeekDeepUtils:
     """class for various utilities related to SeekDeep output"""
     def __init__(self):
-        self.SDO = pd.DataFrame()
+        self.sdo = pd.DataFrame()
     def __recalculate_population_fractions__(self):
-        self.SDO = self.SDO.\
+        self.sdo = self.sdo.\
             groupby('s_Sample').\
             agg({'h_SampFrac' : 'sum'}).\
             rename(columns={'h_SampFrac' : 'h_SampFracSum'}).\
-            merge(self.SDO, how = 'left', on = 's_Sample')
-        self.SDO['h_SampFrac'] = self.SDO.\
+            merge(self.sdo, how = 'left', on = 's_Sample')
+        self.sdo['h_SampFrac'] = self.sdo.\
             apply(lambda x : x.h_SampFrac / x.h_SampFracSum, axis = 1)
-        self.SDO.drop(['h_SampFracSum'], axis = 1, inplace=True)
+        self.sdo.drop(['h_SampFracSum'], axis = 1, inplace=True)
     def __recalculate_cluster_fractions__(self):
         """recalculates cluster averaged fraction in sample"""
-        self.SDO = self.SDO.\
+        self.sdo = self.sdo.\
             groupby('s_Sample').\
             agg({'c_AveragedFrac' : 'sum'}).\
             rename(columns={'c_AveragedFrac' : 's_FracSum'}).\
-            merge(self.SDO, how = 'left', on = 's_Sample')
-        self.SDO['c_AveragedFrac'] = self.SDO.\
+            merge(self.sdo, how = 'left', on = 's_Sample')
+        self.sdo['c_AveragedFrac'] = self.sdo.\
             apply(lambda x : x.c_AveragedFrac / x.s_FracSum, axis = 1)
-        self.SDO.drop(['s_FracSum'], axis = 1, inplace=True)
+        self.sdo.drop(['s_FracSum'], axis = 1, inplace=True)
     def __recalculate_cluster_sample_count(self):
         """recalculate number of occurences for a haplotype in population"""
-        hapCounts = self.SDO.h_popUID.value_counts()
-        self.SDO.h_SampCnt = self.SDO.apply(
+        hapCounts = self.sdo.h_popUID.value_counts()
+        self.sdo.h_SampCnt = self.sdo.apply(
             lambda x : hapCounts[x.h_popUID], axis = 1)
     def __reorder_clusterID__(self):
         """recalculates cluster ID number for each sample"""
-        self.SDO['c_clusterID'] = self.SDO.\
+        self.sdo['c_clusterID'] = self.sdo.\
             groupby('s_Sample').\
             cumcount()
     def __recalculate_COI__(self):
         """recalculates complexity of infection for each sample"""
-        self.SDO = self.SDO.\
+        self.sdo = self.sdo.\
             groupby('s_Sample').\
             agg({'c_clusterID' : 'max'}).\
             rename(columns = {'c_clusterID' : 'new_COI'}).\
-            merge(self.SDO, how = 'left', on = 's_Sample')
-        self.SDO['s_COI'] = self.SDO['new_COI'] + 1
-        self.SDO.drop('new_COI', axis = 1, inplace = True)
+            merge(self.sdo, how = 'left', on = 's_Sample')
+        self.sdo['s_COI'] = self.sdo['new_COI'] + 1
+        self.sdo.drop('new_COI', axis = 1, inplace = True)
+    def __split_cid_date__(self, row):
+        """convert s_Sample to date and cohortid"""
+        a = row.s_Sample.split('-')
+        date, cid = '-'.join(a[:3]), a[-1]
+        return [date, cid]
     def fix_filtered_SDO(self, sdo):
         """recalculates attributes of SeekDeep output dataframe post-filtering"""
-        self.SDO = sdo
-        if not self.SDO.empty:
+        self.sdo = sdo
+        if not self.sdo.empty:
             self.__recalculate_population_fractions__()
             self.__recalculate_cluster_fractions__()
             self.__reorder_clusterID__()
             self.__recalculate_COI__()
             self.__recalculate_cluster_sample_count()
-        return self.SDO
+        return self.sdo
+    def Time_Independent_Allele_Frequency(self, sdo, controls=False):
+        """calculates allele frequency of each haplotype in population with independent time"""
+        # keep only patient samples and normalize dataframe
+        if controls == False:
+            self.sdo = sdo[~sdo.s_Sample.str.contains('ctrl|neg')]
+            self.sdo = self.fix_filtered_SDO(self.sdo)
+        else:
+            self.sdo = sdo
+
+        # split cid and date
+        self.sdo[['date', 'cid']] = self.sdo.apply(
+            lambda x : self.__split_cid_date__(x),
+            axis = 1, result_type = 'expand')
+
+        # initialize dataframe to return
+        a_freq = self.sdo[['h_popUID']].drop_duplicates()
+
+        # select h_popUID + cid and drop duplicates created by dates
+        hapCounts = self.sdo[['h_popUID', 'cid']].\
+            drop_duplicates().\
+            h_popUID.\
+            value_counts()
+        hapCountsTotal = sum(hapCounts)
+
+        # calculate h_popUID counts and frequencies (time independent)
+        a_freq['h_Count'] = a_freq.apply(
+            lambda x : hapCounts[x.h_popUID], axis=1)
+        a_freq['h_Frequency'] = a_freq.apply(
+            lambda x : x.h_Count / hapCountsTotal, axis = 1)
+
+        return a_freq
