@@ -395,45 +395,82 @@ class SeekDeepUtils:
             return wide_cid
     def __calculate_skips__(self, row, diagnose=False):
         """calculate skips by subtracting i and i-1 elements of True indices"""
-        i_event = row.values.nonzero()[0]
+        try:
+            i_event = row.values.nonzero()[0]
+        except AttributeError:
+            i_event = row.nonzero()[0]
         vals = np.array([i_event[i] - i_event[i-1] for i in range(1, len(i_event))])
         if diagnose == False:
             vals = vals[vals > 1]
             return vals - 1
         else:
             return (i_event, vals - 1)
+    def __slice_on_skips__(self, skips, allowedSkips):
+        """split the indices of infection into separate lists based on the allowed skips"""
+
+        # list of lists initialized with a zero in list[0]
+        l = [[0]]
+
+        # counter to keep track of which list is being appended to
+        current_list = 0
+
+        # if skip is within allowed range grow current list
+        # else create new list and increment counter
+        for i,s in enumerate(skips):
+            if s > allowedSkips:
+                current_list+=1
+                l.append([])
+            l[current_list].append(i+1)
+
+        return l
+    def __generate_infection_durations__(self, slice_list, i_event, row, default):
+        """
+        worker function for split infection cases in self.__duration__
+        splits infection events based on slice list generated in __slice_on_skips__
+        yields either :
+        max(dates) - min(dates) for ongoing infections of length longer than 1
+            or
+        default date for infections of length 1
+        """
+        dates = [pd.to_datetime(d) for d in row.index]
+        idx_gen = [np.array([min(i), max(i)]) if len(i) > 1 else np.array(i) for i in slice_list]
+        idx = [i_event[i] for i in idx_gen]
+        for i in idx:
+            if len(i) > 1:
+                yield dates[max(i)] - dates[min(i)]
+            else:
+                yield default
     def __duration__(self, row, allowedSkips, default=15):
+        """calculate the durations of a haplotype given alllowed skips in events"""
+        default = pd.to_timedelta(default, unit='day')
         skips = self.__calculate_skips__(row)
+        if len(skips) == 0:
+            """
+            case where only a single event is recorded for a haplotype
+            ::::::::::::::::::::::::::::
+            return default duration rate
+            """
+            return np.array(default)
         if np.any(skips > allowedSkips):
             i_event, skips = self.__calculate_skips__(row, diagnose=True)
             if np.all(skips > allowedSkips):
                 """
                 case where all events are outside allowed skips
-                ::::::::
+                :::::::::::::::::::::::::::::::::::::::::::::::::::::
                 return default duration rate for each infection event
                 """
-                return [default for _ in len(i_event)]
+                return [default for _ in i_event]
             else:
                 """
                 case where some events are outside allowed skips
                 :::::::::::::::::::::::::
                 return array of durations
                 """
-                print(row)
-                print(i_event)
-                print(skips)
-                failed_idx = np.where(skips > allowedSkips)[0] + 1
-                passed = np.where(skips <= allowedSkips)[0]
-                print(passed)
-                sys.exit()
-                # w = np.where(skips > allowedSkips)[0] + 1
-                # if len(w) > 1:
-                #     print(row)
-                #     print(i_event)
-                #     print(skips)
-                #     print(w)
-                #     print(i_event[w])
-                #     sys.exit()
+
+                l = self.__slice_on_skips__(skips, allowedSkips)
+                durations = [d for d in self.__generate_infection_durations__(l, i_event, row, default)]
+                return durations
+                # sys.exit()
         else:
             """
             default case, where all events are within allowed skips
@@ -444,7 +481,6 @@ class SeekDeepUtils:
             end, start = [pd.to_datetime(i) for i in [row.index[max(idx)], row.index[min(idx)]]]
             duration = end - start
             return end - start
-
     def __split_cid_date__(self, row):
         """convert s_Sample to date and cohortid"""
         a = row.s_Sample.split('-')
@@ -473,6 +509,29 @@ class SeekDeepUtils:
             axis = 1, result_type = 'expand')
 
         return self.sdo
+    def __prepare_durations__(self, duration_list):
+        """melt multiple duration events in dataframe to separate rows and return ordered dataframe"""
+        i_durations = pd.concat(duration_list, ignore_index=True)
+
+        # expand listed durations to separate rows
+        s = i_durations.apply(
+            lambda x: pd.Series(x['durations']),axis=1).\
+            stack().\
+            reset_index(level=1, drop=True)
+        s.name = 'duration'
+
+        # join back on original dataframe
+        i_durations = i_durations.\
+            drop('durations', axis=1).\
+            join(s)
+
+        # sequentially label infection durations
+        i_durations['i_event'] = i_durations.\
+            groupby(['cohortid', 'h_popUID']).\
+            cumcount()
+
+        # return ordered dataframe
+        return i_durations[['cohortid', 'h_popUID', 'i_event', 'duration']]
     def fix_filtered_SDO(self, sdo):
         """recalculates attributes of SeekDeep output dataframe post-filtering"""
         self.sdo = sdo
@@ -515,13 +574,30 @@ class SeekDeepUtils:
 
         vals = np.hstack(vals.values)
         return vals
-
     def Duration_of_Infection(self, sdo, meta, controls=False, allowedSkips = 3):
+        """calculates duration of infections for each cohortid ~ h_popUID"""
         self.__prepare_sdo__(sdo, controls)
         self.__prepare_meta__(meta)
 
+        # generate timelines for each cohortid~h_popUID
         timelines = {c : self.__generate_timeline__(c, boolArray=True) for c in self.sdo.cohortid.unique()}
+
+        # list of duration dataframes to grow
+        i_durations = []
+
+        # calculate duration of infections for each cohortid~h_popUID
         for cid, t in timelines.items():
-            t.apply(
+            # calculate durations
+            t['durations'] = t.apply(
                 lambda x : self.__duration__(x, allowedSkips), axis = 1)
-            # break
+
+            # add cohortid as column of dataframe
+            t['cohortid'] = cid
+
+            # grow list of duration dataframes
+            i_durations.append(t.reset_index()[['cohortid', 'h_popUID', 'durations']])
+
+        # concatenate all dataframes and prepare for downstream susage
+        durations = self.__prepare_durations__(i_durations)
+
+        return durations
