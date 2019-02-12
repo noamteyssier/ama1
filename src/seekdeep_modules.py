@@ -574,7 +574,7 @@ class SeekDeepUtils:
 
         vals = np.hstack(vals.values)
         return vals
-    def Duration_of_Infection(self, sdo, meta, controls=False, allowedSkips = 3):
+    def Duration_of_Infection(self, sdo, meta, controls=False, allowedSkips = 3, default=15):
         """calculates duration of infections for each cohortid ~ h_popUID"""
         self.__prepare_sdo__(sdo, controls)
         self.__prepare_meta__(meta)
@@ -589,7 +589,7 @@ class SeekDeepUtils:
         for cid, t in timelines.items():
             # calculate durations
             t['durations'] = t.apply(
-                lambda x : self.__duration__(x, allowedSkips), axis = 1)
+                lambda x : self.__duration__(x, allowedSkips, default=default), axis = 1)
 
             # add cohortid as column of dataframe
             t['cohortid'] = cid
