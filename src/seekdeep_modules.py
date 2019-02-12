@@ -379,14 +379,17 @@ class SeekDeepUtils:
         long_cid = self.meta[
             self.meta.cohortid == cohortid
         ].merge(
-            self.sdo[['date', 'cohortid', 'h_popUID']],
+            self.sdo[['date', 'cohortid', 'h_popUID', 'c_AveragedFrac']],
             how = 'left'
         )
 
-        wide_cid = long_cid.pivot(
+        long_cid['h_fraction'] = long_cid.apply(
+            lambda x : x.c_AveragedFrac * x.qpcr, axis = 1)
+
+        wide_cid = long_cid[['date', 'cohortid', 'h_popUID', 'h_fraction']].pivot(
             index='h_popUID',
             columns = 'date',
-            values = 'qpcr')
+            values = 'h_fraction')
 
         wide_cid = wide_cid[~wide_cid.index.isna()]
         if boolArray:
@@ -601,3 +604,14 @@ class SeekDeepUtils:
         durations = self.__prepare_durations__(i_durations)
 
         return durations
+    def New_Infections(self, sdo, meta, controls=False):
+        self.__prepare_sdo__(sdo, controls)
+        self.__prepare_meta__(meta)
+
+        # generate timelines for each cohortid~h_popUID
+        timelines = {c : self.__generate_timeline__(c, boolArray=True) for c in self.sdo.cohortid.unique()}
+
+        for c, t in timelines.items():
+            # print(c)
+            print(t)
+            # break
