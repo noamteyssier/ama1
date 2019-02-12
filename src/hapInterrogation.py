@@ -12,8 +12,9 @@ def main():
     meta = pd.read_stata(meta_fn)
 
     s = SeekDeepUtils()
-    a_frequency = s.Time_Independent_Allele_Frequency(sdo)
-    hapSkips = s.Haplotype_Skips(sdo, meta)
+    # a_frequency = s.Time_Independent_Allele_Frequency(sdo)
+    # hapSkips = s.Haplotype_Skips(sdo, meta)
+    s.Duration_of_Infection(sdo, meta, allowedSkips=2)
 
 if __name__ == '__main__':
     main()

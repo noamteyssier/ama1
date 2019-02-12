@@ -393,12 +393,58 @@ class SeekDeepUtils:
             return ~wide_cid.isna()
         else:
             return wide_cid
-    def __calculate_skips__(self, row):
+    def __calculate_skips__(self, row, diagnose=False):
         """calculate skips by subtracting i and i-1 elements of True indices"""
         i_event = row.values.nonzero()[0]
         vals = np.array([i_event[i] - i_event[i-1] for i in range(1, len(i_event))])
-        vals = vals[vals > 1]
-        return vals
+        if diagnose == False:
+            vals = vals[vals > 1]
+            return vals - 1
+        else:
+            return (i_event, vals - 1)
+    def __duration__(self, row, allowedSkips, default=15):
+        skips = self.__calculate_skips__(row)
+        if np.any(skips > allowedSkips):
+            i_event, skips = self.__calculate_skips__(row, diagnose=True)
+            if np.all(skips > allowedSkips):
+                """
+                case where all events are outside allowed skips
+                ::::::::
+                return default duration rate for each infection event
+                """
+                return [default for _ in len(i_event)]
+            else:
+                """
+                case where some events are outside allowed skips
+                :::::::::::::::::::::::::
+                return array of durations
+                """
+                print(row)
+                print(i_event)
+                print(skips)
+                failed_idx = np.where(skips > allowedSkips)[0] + 1
+                passed = np.where(skips <= allowedSkips)[0]
+                print(passed)
+                sys.exit()
+                # w = np.where(skips > allowedSkips)[0] + 1
+                # if len(w) > 1:
+                #     print(row)
+                #     print(i_event)
+                #     print(skips)
+                #     print(w)
+                #     print(i_event[w])
+                #     sys.exit()
+        else:
+            """
+            default case, where all events are within allowed skips
+            :::::::::::::::::::
+            return last - first
+            """
+            idx = np.where(row > 0)[0]
+            end, start = [pd.to_datetime(i) for i in [row.index[max(idx)], row.index[min(idx)]]]
+            duration = end - start
+            return end - start
+
     def __split_cid_date__(self, row):
         """convert s_Sample to date and cohortid"""
         a = row.s_Sample.split('-')
@@ -464,7 +510,18 @@ class SeekDeepUtils:
         self.__prepare_meta__(meta)
 
         timelines = [self.__generate_timeline__(c, boolArray=True) for c in self.sdo.cohortid.unique()]
-        vals = pd.concat(
-            [t.apply(lambda x : self.__calculate_skips__(x), axis = 1) for t in timelines])
-        vals = np.hstack(vals.values) - 1
+        vals = pd.concat([t.apply(
+            lambda x : self.__calculate_skips__(x), axis = 1) for t in timelines])
+
+        vals = np.hstack(vals.values)
         return vals
+
+    def Duration_of_Infection(self, sdo, meta, controls=False, allowedSkips = 3):
+        self.__prepare_sdo__(sdo, controls)
+        self.__prepare_meta__(meta)
+
+        timelines = {c : self.__generate_timeline__(c, boolArray=True) for c in self.sdo.cohortid.unique()}
+        for cid, t in timelines.items():
+            t.apply(
+                lambda x : self.__duration__(x, allowedSkips), axis = 1)
+            # break
