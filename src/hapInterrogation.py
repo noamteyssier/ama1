@@ -44,16 +44,18 @@ def main():
     # initialize modules
     s = SeekDeepUtils()
 
+    # calculate allele frequency
     if args.allele_frequency:
         a_frequency = s.Time_Independent_Allele_Frequency(sdo)
         return print_out(a_frequency)
 
-    if args.haplotype_skips:
+    # calculate haplotype skips
+    elif args.haplotype_skips:
         hapSkips = s.Haplotype_Skips(sdo, meta)
         return print(hapSkips)
 
-
-    if args.durations:
+    # calculate duration of infections
+    elif args.durations:
         durations = s.Duration_of_Infection(
             sdo, meta,
             allowedSkips = args.num_skips,
