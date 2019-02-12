@@ -4,7 +4,6 @@ import pandas as pd
 import numpy as np
 import itertools
 import sys
-from ggplot import *
 
 class HaplotypeUtils:
     def __init__(self, dist, sdo, meta):
@@ -256,6 +255,7 @@ class HaplotypeUtils:
         else:
             return self.oossp
     def PlotOOSSP(self, vlines, hlines, color_type):
+        from ggplot import *
         self.__oossp__()
 
         if not color_type:
