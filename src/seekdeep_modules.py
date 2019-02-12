@@ -397,7 +397,10 @@ class SeekDeepUtils:
         else:
             return wide_cid
     def __calculate_skips__(self, row, diagnose=False):
-        """calculate skips by subtracting i and i-1 elements of True indices"""
+        """
+        calculate skips by subtracting i and i-1 elements of True indices
+        input : bool array
+        """
         try:
             i_event = row.values.nonzero()[0]
         except AttributeError:
@@ -408,6 +411,10 @@ class SeekDeepUtils:
             return vals - 1
         else:
             return (i_event, vals - 1)
+    def __generic_skips__(self, row):
+        """function to calculate skips in any array"""
+        skips = np.array([row[i] - row[i-1] for i in range(1, len(row))])
+        return skips - 1
     def __slice_on_skips__(self, skips, allowedSkips):
         """split the indices of infection into separate lists based on the allowed skips"""
 
@@ -484,6 +491,24 @@ class SeekDeepUtils:
             end, start = [pd.to_datetime(i) for i in [row.index[max(idx)], row.index[min(idx)]]]
             duration = end - start
             return end - start
+    def __haplotype_infections__(self, dates, allowedSkips):
+        """calculate number of new infection events for a given haplotype"""
+        skips = self.__generic_skips__(dates)
+
+        # if all skips are allowed then only a single infection is recorded
+        if np.all(skips <= allowedSkips):
+            n_infections = 1
+
+        # otherwise slice the skips into separate events and count them
+        else:
+            sliced_skips = self.__slice_on_skips__(skips, allowedSkips)
+            n_infections = len(sliced_skips)
+
+        # if the first date is the first visit subtract 1 from n_infections
+        if min(dates) == 0:
+            n_infections -= 1
+
+        return n_infections
     def __split_cid_date__(self, row):
         """convert s_Sample to date and cohortid"""
         a = row.s_Sample.split('-')
@@ -535,6 +560,35 @@ class SeekDeepUtils:
 
         # return ordered dataframe
         return i_durations[['cohortid', 'h_popUID', 'i_event', 'duration']]
+    def __prepare_new_infections__(self, cids, hids, new_ifx):
+        """prepare new infections dataframe for downstream usage"""
+
+        # create dataframe from lists
+        self.new_infections = pd.DataFrame({
+            'cohortid' : cids,
+            'h_popUID' : hids,
+            'n_infection' : new_ifx})
+
+        # filter haplotypes without new infections
+        self.new_infections = self.new_infections[
+            self.new_infections.n_infection > 0]
+
+        # sum total new infections by cohortid
+        new_infection_totals = self.new_infections.\
+            groupby('cohortid').\
+            agg({'n_infection' : 'sum'}).\
+            rename(columns = {'n_infection' : 'total_n_infection'}).\
+            reset_index()
+
+        # merge back into original dataframe
+        self.new_infections = self.new_infections.merge(
+            new_infection_totals, how = 'left')
+
+        # arrange columns for beauty
+        self.new_infections = self.new_infections[
+            ['cohortid', 'total_n_infection', 'h_popUID', 'n_infection']]
+
+        return self.new_infections
     def fix_filtered_SDO(self, sdo):
         """recalculates attributes of SeekDeep output dataframe post-filtering"""
         self.sdo = sdo
@@ -604,14 +658,39 @@ class SeekDeepUtils:
         durations = self.__prepare_durations__(i_durations)
 
         return durations
-    def New_Infections(self, sdo, meta, controls=False):
+    def New_Infections(self, sdo, meta, controls=False, allowedSkips = 3):
+        """calculates number of new infections for each haplotype in each cohortid with allowed skips"""
         self.__prepare_sdo__(sdo, controls)
         self.__prepare_meta__(meta)
 
         # generate timelines for each cohortid~h_popUID
-        timelines = {c : self.__generate_timeline__(c, boolArray=True) for c in self.sdo.cohortid.unique()}
+        timelines = {c : self.__generate_timeline__(c, boolArray=True) for c in self.sdo.cohortid.unique() }#if c == '3149'}
 
-        for c, t in timelines.items():
-            # print(c)
-            print(t)
-            # break
+        # lists to grow for placement into dataframe
+        cids = []
+        hids = []
+        new_ifx = []
+
+        # iterate through cid~timelines
+        for cohortid, timeline in timelines.items():
+
+            # cut timelines for indices where infection events are found by haplotype
+            haplotypes, dates_found = np.array(np.where(timeline>0)) # 2d arr [[haplotypes found] [dates found]]
+
+            # iterate through haplotypes and calculate number of new infections
+            for h in np.unique(haplotypes):
+
+                # haplotype specific dates
+                dates = dates_found[np.where(haplotypes == h)]
+
+                # calculated number of new infections for haplotype
+                new_infections = self.__haplotype_infections__(dates, allowedSkips)
+
+                # grow lists
+                cids.append(cohortid)
+                hids.append(timeline.index[h])
+                new_ifx.append(new_infections)
+
+        # prepare dataframe for printout
+        self.__prepare_new_infections__(cids, hids, new_ifx)
+        return self.new_infections

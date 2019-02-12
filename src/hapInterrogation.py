@@ -19,12 +19,15 @@ def get_args():
         help="Calculate allele frequencies of haplotypes in the population")
     p.add_argument('-s', '--haplotype_skips', action='store_true',
         help="Create a vector of the skips found in the population")
+    p.add_argument('-g', '--new_infections', action='store_true',
+        help='Create a dataframe for the number of new infections of cohortid~h_popUID')
     p.add_argument('-d', '--durations', action='store_true',
         help="Create a dataframe showing the duration of infection of each cohortid~h_popUID")
     p.add_argument('-n', '--num_skips', default = 3, type=int,
         help="Number of allowed skips to allow during calculation of durations (default = 3 skips)")
     p.add_argument('-x', '--default_duration', default=15, type=int,
         help="Default duration rate to use for single event infections (default = 15 days)")
+
 
     # if no args given print help
     if len(sys.argv) == 1:
@@ -61,6 +64,11 @@ def main():
             allowedSkips = args.num_skips,
             default=args.default_duration)
         return print_out(durations)
+
+    elif args.new_infections:
+        new_infections = s.New_Infections(
+            sdo, meta, allowedSkips=args.num_skips)
+        return print_out(new_infections)
 
 if __name__ == '__main__':
     main()
