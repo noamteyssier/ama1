@@ -26,6 +26,11 @@ def get_args():
     p.add_argument('-x', '--default_duration', default=15, type=int,
         help="Default duration rate to use for single event infections (default = 15 days)")
 
+    # if no args given print help
+    if len(sys.argv) == 1:
+        p.print_help(sys.stderr)
+        sys.exit(1)
+
     args = p.parse_args()
     return args
 def print_out(df):
