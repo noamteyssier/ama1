@@ -5,6 +5,8 @@ import numpy as np
 import itertools
 import sys
 from ggplot import *
+import seaborn as sns
+import matplotlib.pyplot as plt
 
 class HaplotypeUtils:
     def __init__(self, dist, sdo, meta):
@@ -396,6 +398,27 @@ class SeekDeepUtils:
             return ~wide_cid.isna()
         else:
             return wide_cid
+    def __all_timelines__(self):
+        """returns a dictionary of all timelines indexed by cohortid"""
+        return {cid : self.__generate_timeline__(cid, boolArray=True) for cid in self.sdo.cohortid.unique()}
+    def __create_skip_dataframe__(self):
+        """calculates number of skips for each cid~h_popUID at each date"""
+        timelines = self.__all_timelines__()
+
+        skip_dataframe = []
+
+        for cid, timeline in timelines.items():
+
+            # find infection events and skips between them
+            timeline[['i_events', 'skips']] = timeline.apply(
+                lambda x : self.__calculate_skips__(x, diagnose=True),
+                axis = 1, result_type = 'expand')
+
+            # for haplotype row create a dataframe of skips and dates
+            for _, row in timeline.iterrows():
+                skip_dataframe.append(self.__arrange_skips__(row, cid))
+
+        return pd.concat(skip_dataframe)
     def __calculate_skips__(self, row, diagnose=False):
         """
         calculate skips by subtracting i and i-1 elements of True indices
@@ -433,6 +456,14 @@ class SeekDeepUtils:
             l[current_list].append(i+1)
 
         return l
+    def __arrange_skips__(self, row, cid):
+        """create a dataframe from lists created in __calculate_skips__"""
+        row.skips = np.insert(row.skips, 0, 0) # add a zero for the initial infection
+        return pd.DataFrame({
+            'cohortid' : cid,
+            'h_popUID' : row.name,
+            'date' : row.index[:-2].values[row.i_events],
+            'skips' : row.skips})
     def __generate_infection_durations__(self, slice_list, i_event, row, default):
         """
         worker function for split infection cases in self.__duration__
@@ -639,47 +670,13 @@ class SeekDeepUtils:
         return params
     def __foi_method_month__(self, sdo, meta, allowedSkips, default):
         """calculate force of infection by month"""
-        sdo = self.__prepare_sdo__(sdo)
+        self.__prepare_sdo__(sdo)
         self.__prepare_meta__(meta)
+        skip_df = self.__create_skip_dataframe__()
+        self.sdo = self.sdo.merge(skip_df, how='left')
 
-        self.sdo.date = pd.to_datetime(self.sdo.date, format = '%Y/%m/%d')
-        year_months = self.sdo.date.dt.to_period('M').unique()
+        print(self.sdo)
 
-        sni = []
-        smd = []
-        se = []
-        fois = []
-
-        for ym in year_months:
-            cm_sdo = sdo[sdo.date.dt.to_period('M') == ym]
-
-            self.New_Infections(
-                cm_sdo, self.meta,
-                allowedSkips=allowedSkips)
-
-            # create parameters of foi
-            scalar_exposure = self.__foi_exposure__(self.meta)
-            scalar_exposure_duration = self.__foi_exposure_duration__(cm_sdo)
-            scalar_new_infections = self.__foi_new_infections__(self.new_infections)
-
-            # calculate foi
-            foi = scalar_new_infections / (scalar_exposure * scalar_exposure_duration)
-
-            sni.append(scalar_new_infections)
-            smd.append(scalar_exposure_duration)
-            se.append(scalar_exposure)
-            fois.append(foi)
-
-
-        # return params as pandas dataframe
-        params = pd.DataFrame({
-            'new_infections' : sni,
-            'duration' : smd,
-            'exposure' : se,
-            'force_of_infection' : fois,
-            'year_month' : year_months})
-
-        return params
     def __foi_method_agecat__(self, sdo, meta, allowedSkips, default):
         sdo = self.__prepare_sdo__(sdo)
         self.__prepare_meta__(meta)
