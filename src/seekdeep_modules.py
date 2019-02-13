@@ -460,7 +460,7 @@ class SeekDeepUtils:
             ::::::::::::::::::::::::::::
             return default duration rate
             """
-            return np.array(default)
+            return default
         if np.any(skips > allowedSkips):
             i_event, skips = self.__calculate_skips__(row, diagnose=True)
             if np.all(skips > allowedSkips):
@@ -480,7 +480,6 @@ class SeekDeepUtils:
                 l = self.__slice_on_skips__(skips, allowedSkips)
                 durations = [d for d in self.__generate_infection_durations__(l, i_event, row, default)]
                 return durations
-                # sys.exit()
         else:
             """
             default case, where all events are within allowed skips
@@ -557,6 +556,10 @@ class SeekDeepUtils:
         i_durations['i_event'] = i_durations.\
             groupby(['cohortid', 'h_popUID']).\
             cumcount()
+
+        # convert duration to integer of days
+        i_durations['duration'] = i_durations.\
+            duration.dt.days
 
         self.durations = i_durations[['cohortid', 'h_popUID', 'i_event', 'duration']]
         # return ordered dataframe
@@ -704,7 +707,28 @@ class SeekDeepUtils:
             default=default)
         self.New_Infections(
             self.sdo, self.meta,
-            allowedSkips=allowedSkips
-        )
-        print(self.durations)
-        print(self.new_infections)
+            allowedSkips=allowedSkips)
+
+        # number of people infected
+        scalar_exposure = self.sdo['cohortid'].\
+            drop_duplicates().\
+            size
+
+        # sum of number of new infections
+        scalar_new_infections = self.new_infections[['cohortid', 'total_n_infection']].\
+            drop_duplicates().\
+            total_n_infection.\
+            values.\
+            sum()
+
+        # mean duration of infection
+        scalar_mean_duration = self.durations.\
+            duration.\
+            values.\
+            mean()
+
+        # calculate force of infection
+        foi = scalar_new_infections / (scalar_exposure * scalar_mean_duration)
+
+        # return parameters as list
+        return [scalar_new_infections, scalar_mean_duration, scalar_exposure, foi]

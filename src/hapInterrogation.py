@@ -41,6 +41,12 @@ def get_args():
 def print_out(df):
     """simple printout for a pandas dataframe to stdout"""
     df.to_csv(sys.stdout, sep="\t", index=False)
+def print_foi(foi_params):
+    """print out of force of infection"""
+    header = '\t'.join(['New_Infections', 'Mean_Duration', 'Exposed', 'Force_of_Infection'])
+    params = '\t'.join([str(i) for i in foi_params])
+    print(header)
+    print(params)
 def main():
     args = get_args()
     sdo = pd.read_csv(args.seekdeep_output, sep = "\t")
@@ -73,10 +79,12 @@ def main():
         return print_out(new_infections)
 
     elif args.force_of_infection:
-        s.Force_of_Infection(
+        foi_params = s.Force_of_Infection(
             sdo, meta,
             allowedSkips=args.num_skips,
             default=args.default_duration)
+        print_foi(foi_params)
+
 
 if __name__ == '__main__':
     main()
