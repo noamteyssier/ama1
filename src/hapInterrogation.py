@@ -15,7 +15,7 @@ def get_args():
     p.add_argument('-m', '--meta', required=False,
         default= "../prism2/stata/allVisits.dta",
         help="Cohort Meta information (stata13) to relate cohortids")
-    p.add_argument('-f', '--allele_frequency', action='store_true',
+    p.add_argument('-a', '--allele_frequency', action='store_true',
         help="Calculate allele frequencies of haplotypes in the population")
     p.add_argument('-s', '--haplotype_skips', action='store_true',
         help="Create a vector of the skips found in the population")
@@ -23,6 +23,8 @@ def get_args():
         help='Create a dataframe for the number of new infections of cohortid~h_popUID')
     p.add_argument('-d', '--durations', action='store_true',
         help="Create a dataframe showing the duration of infection of each cohortid~h_popUID")
+    p.add_argument('-f', '--force_of_infection', action='store_true',
+        help="Calculate the Force of Infection of the Population")
     p.add_argument('-n', '--num_skips', default = 3, type=int,
         help="Number of allowed skips to allow during calculation of durations (default = 3 skips)")
     p.add_argument('-x', '--default_duration', default=15, type=int,
@@ -69,6 +71,12 @@ def main():
         new_infections = s.New_Infections(
             sdo, meta, allowedSkips=args.num_skips)
         return print_out(new_infections)
+
+    elif args.force_of_infection:
+        s.Force_of_Infection(
+            sdo, meta,
+            allowedSkips=args.num_skips,
+            default=args.default_duration)
 
 if __name__ == '__main__':
     main()

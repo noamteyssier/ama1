@@ -558,8 +558,9 @@ class SeekDeepUtils:
             groupby(['cohortid', 'h_popUID']).\
             cumcount()
 
+        self.durations = i_durations[['cohortid', 'h_popUID', 'i_event', 'duration']]
         # return ordered dataframe
-        return i_durations[['cohortid', 'h_popUID', 'i_event', 'duration']]
+        return self.durations
     def __prepare_new_infections__(self, cids, hids, new_ifx):
         """prepare new infections dataframe for downstream usage"""
 
@@ -655,9 +656,9 @@ class SeekDeepUtils:
             i_durations.append(t.reset_index()[['cohortid', 'h_popUID', 'durations']])
 
         # concatenate all dataframes and prepare for downstream susage
-        durations = self.__prepare_durations__(i_durations)
+        self.durations = self.__prepare_durations__(i_durations)
 
-        return durations
+        return self.durations
     def New_Infections(self, sdo, meta, controls=False, allowedSkips = 3):
         """calculates number of new infections for each haplotype in each cohortid with allowed skips"""
         self.__prepare_sdo__(sdo, controls)
@@ -694,3 +695,16 @@ class SeekDeepUtils:
         # prepare dataframe for printout
         self.__prepare_new_infections__(cids, hids, new_ifx)
         return self.new_infections
+    def Force_of_Infection(self, sdo, meta, controls=False, allowedSkips = 3, default=15):
+        self.__prepare_sdo__(sdo, controls)
+        self.__prepare_meta__(meta)
+        self.Duration_of_Infection(
+            self.sdo, self.meta,
+            allowedSkips=allowedSkips,
+            default=default)
+        self.New_Infections(
+            self.sdo, self.meta,
+            allowedSkips=allowedSkips
+        )
+        print(self.durations)
+        print(self.new_infections)
