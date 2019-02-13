@@ -23,8 +23,8 @@ def get_args():
         help='Create a dataframe for the number of new infections of cohortid~h_popUID')
     p.add_argument('-d', '--durations', action='store_true',
         help="Create a dataframe showing the duration of infection of each cohortid~h_popUID")
-    p.add_argument('-f', '--force_of_infection', action='store_true',
-        help="Calculate the Force of Infection of the Population")
+    p.add_argument('-f', '--force_of_infection', type=str,
+        help="Calculate the Force of Infection of the Population [all, by_month, by_agecat, by_month_agecat]")
     p.add_argument('-n', '--num_skips', default = 3, type=int,
         help="Number of allowed skips to allow during calculation of durations (default = 3 skips)")
     p.add_argument('-x', '--default_duration', default=15, type=int,
@@ -41,12 +41,6 @@ def get_args():
 def print_out(df):
     """simple printout for a pandas dataframe to stdout"""
     df.to_csv(sys.stdout, sep="\t", index=False)
-def print_foi(foi_params):
-    """print out of force of infection"""
-    header = '\t'.join(['New_Infections', 'Mean_Duration', 'Exposed', 'Force_of_Infection'])
-    params = '\t'.join([str(i) for i in foi_params])
-    print(header)
-    print(params)
 def main():
     args = get_args()
     sdo = pd.read_csv(args.seekdeep_output, sep = "\t")
@@ -63,7 +57,10 @@ def main():
     # calculate haplotype skips
     elif args.haplotype_skips:
         hapSkips = s.Haplotype_Skips(sdo, meta)
-        return print(hapSkips)
+        # for i in hapSkips:
+        #     print(i)
+        print(hapSkips.size)
+        # return print(hapSkips)
 
     # calculate duration of infections
     elif args.durations:
@@ -81,9 +78,10 @@ def main():
     elif args.force_of_infection:
         foi_params = s.Force_of_Infection(
             sdo, meta,
+            foi_method=args.force_of_infection,
             allowedSkips=args.num_skips,
             default=args.default_duration)
-        print_foi(foi_params)
+        return print_out(foi_params)
 
 
 if __name__ == '__main__':

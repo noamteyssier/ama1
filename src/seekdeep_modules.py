@@ -593,6 +593,98 @@ class SeekDeepUtils:
             ['cohortid', 'total_n_infection', 'h_popUID', 'n_infection']]
 
         return self.new_infections
+    def __foi_exposure__(self, meta):
+        """calculate exposure for a given sdo dataframe"""
+        scalar_exposure = meta['cohortid'].\
+            drop_duplicates().\
+            size
+        return scalar_exposure
+    def __foi_new_infections__(self, new_infections):
+        """calculate the number of new infections for a given new_infections dataframe"""
+        scalar_new_infections = self.new_infections[['cohortid', 'total_n_infection']].\
+            drop_duplicates().\
+            total_n_infection.\
+            values.\
+            sum()
+        return scalar_new_infections
+    def __foi_exposure_duration__(self, sdo):
+        """calculate duration in years for a given sdo dataframe"""
+        sdo.date = pd.to_datetime(sdo.date, format = '%Y/%m/%d')
+        diff = sdo.date.max() - sdo.date.min()
+        return diff.days / 365.25
+    def __foi_method_all__(self, sdo, meta, allowedSkips, default):
+        """calculate force of infection over the entire dataset"""
+        self.__prepare_sdo__(sdo)
+        self.__prepare_meta__(meta)
+
+        self.New_Infections(
+            self.sdo, self.meta,
+            allowedSkips=allowedSkips)
+
+        # create parameters of foi
+        scalar_exposure = self.__foi_exposure__(self.meta)
+        scalar_exposure_duration = self.__foi_exposure_duration__(self.sdo)
+        scalar_new_infections = self.__foi_new_infections__(self.new_infections)
+
+        # calculate foi
+        foi = scalar_new_infections / (scalar_exposure * scalar_exposure_duration)
+
+        # return params as pandas dataframe
+        params = pd.DataFrame({
+            'new_infections' : [scalar_new_infections],
+            'duration' : [scalar_exposure_duration],
+            'exposure' : [scalar_exposure],
+            'force_of_infection' : [foi]})
+
+        return params
+    def __foi_method_month__(self, sdo, meta, allowedSkips, default):
+        """calculate force of infection by month"""
+        sdo = self.__prepare_sdo__(sdo)
+        self.__prepare_meta__(meta)
+
+        self.sdo.date = pd.to_datetime(self.sdo.date, format = '%Y/%m/%d')
+        year_months = self.sdo.date.dt.to_period('M').unique()
+
+        sni = []
+        smd = []
+        se = []
+        fois = []
+
+        for ym in year_months:
+            cm_sdo = sdo[sdo.date.dt.to_period('M') == ym]
+
+            self.New_Infections(
+                cm_sdo, self.meta,
+                allowedSkips=allowedSkips)
+
+            # create parameters of foi
+            scalar_exposure = self.__foi_exposure__(self.meta)
+            scalar_exposure_duration = self.__foi_exposure_duration__(cm_sdo)
+            scalar_new_infections = self.__foi_new_infections__(self.new_infections)
+
+            # calculate foi
+            foi = scalar_new_infections / (scalar_exposure * scalar_exposure_duration)
+
+            sni.append(scalar_new_infections)
+            smd.append(scalar_exposure_duration)
+            se.append(scalar_exposure)
+            fois.append(foi)
+
+
+        # return params as pandas dataframe
+        params = pd.DataFrame({
+            'new_infections' : sni,
+            'duration' : smd,
+            'exposure' : se,
+            'force_of_infection' : fois,
+            'year_month' : year_months})
+
+        return params
+    def __foi_method_agecat__(self, sdo, meta, allowedSkips, default):
+        sdo = self.__prepare_sdo__(sdo)
+        self.__prepare_meta__(meta)
+
+        print(sdo)
     def fix_filtered_SDO(self, sdo):
         """recalculates attributes of SeekDeep output dataframe post-filtering"""
         self.sdo = sdo
@@ -637,7 +729,7 @@ class SeekDeepUtils:
         return vals
     def Duration_of_Infection(self, sdo, meta, controls=False, allowedSkips = 3, default=15):
         """calculates duration of infections for each cohortid ~ h_popUID"""
-        self.__prepare_sdo__(sdo, controls)
+        self.__prepare_sdo__(sdo)
         self.__prepare_meta__(meta)
 
         # generate timelines for each cohortid~h_popUID
@@ -698,37 +790,11 @@ class SeekDeepUtils:
         # prepare dataframe for printout
         self.__prepare_new_infections__(cids, hids, new_ifx)
         return self.new_infections
-    def Force_of_Infection(self, sdo, meta, controls=False, allowedSkips = 3, default=15):
-        self.__prepare_sdo__(sdo, controls)
-        self.__prepare_meta__(meta)
-        self.Duration_of_Infection(
-            self.sdo, self.meta,
-            allowedSkips=allowedSkips,
-            default=default)
-        self.New_Infections(
-            self.sdo, self.meta,
-            allowedSkips=allowedSkips)
-
-        # number of people infected
-        scalar_exposure = self.sdo['cohortid'].\
-            drop_duplicates().\
-            size
-
-        # sum of number of new infections
-        scalar_new_infections = self.new_infections[['cohortid', 'total_n_infection']].\
-            drop_duplicates().\
-            total_n_infection.\
-            values.\
-            sum()
-
-        # mean duration of infection
-        scalar_mean_duration = self.durations.\
-            duration.\
-            values.\
-            mean()
-
-        # calculate force of infection
-        foi = scalar_new_infections / (scalar_exposure * scalar_mean_duration)
-
-        # return parameters as list
-        return [scalar_new_infections, scalar_mean_duration, scalar_exposure, foi]
+    def Force_of_Infection(self, sdo, meta, controls=False, foi_method = 'all', allowedSkips = 3, default=15):
+        """calculate force of infection for a dataset"""
+        if foi_method == 'all':
+            return self.__foi_method_all__(sdo, meta, allowedSkips, default)
+        elif foi_method == 'by_month':
+            return self.__foi_method_month__(sdo, meta, allowedSkips, default)
+        elif foi_method == 'by_agecat':
+            self.__foi_method_agecat__(sdo, meta, allowedSkips, default)
