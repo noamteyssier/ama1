@@ -740,7 +740,23 @@ class SeekDeepUtils:
             axis=1)
         return monthly_infections
     def __foi_method_person__(self):
-        print(self.sdo)
+        """calculate force of infection for each person"""
+        cid_infections = self.sdo.\
+            groupby(['cohortid']).agg({
+                'infection_event' : 'sum',
+                'date' : lambda x : (max(x) - min(x)).days / 356.25
+            }).\
+            reset_index()
+
+        # convert single infection events into a default rate
+        cid_infections['date'] = cid_infections.apply(
+            lambda x : 15/356.25 if x.date == 0 else x.date, axis = 1)
+
+        # calculate force of infection
+        cid_infections['foi'] = cid_infections.apply(
+            lambda x : x.infection_event / x.date, axis = 1)
+
+        return cid_infections
     def fix_filtered_SDO(self, sdo):
         """recalculates attributes of SeekDeep output dataframe post-filtering"""
         self.sdo = sdo
@@ -870,4 +886,6 @@ class SeekDeepUtils:
         elif foi_method == 'individual':
             return self.__foi_method_individual__()
         elif foi_method == 'person':
-            self.__foi_method_person__()
+            return self.__foi_method_person__()
+        else:
+            sys.exit('Error : FOI method "{0}" not recognized'.format(foi_method))
