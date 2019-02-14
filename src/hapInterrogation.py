@@ -57,10 +57,7 @@ def main():
     # calculate haplotype skips
     elif args.haplotype_skips:
         hapSkips = s.Haplotype_Skips(sdo, meta)
-        # for i in hapSkips:
-        #     print(i)
-        print(hapSkips.size)
-        # return print(hapSkips)
+        return print_out(hapSkips)
 
     # calculate duration of infections
     elif args.durations:

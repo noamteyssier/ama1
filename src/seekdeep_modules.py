@@ -401,24 +401,6 @@ class SeekDeepUtils:
     def __all_timelines__(self):
         """returns a dictionary of all timelines indexed by cohortid"""
         return {cid : self.__generate_timeline__(cid, boolArray=True) for cid in self.sdo.cohortid.unique()}
-    def __create_skip_dataframe__(self):
-        """calculates number of skips for each cid~h_popUID at each date"""
-        timelines = self.__all_timelines__()
-
-        skip_dataframe = []
-
-        for cid, timeline in timelines.items():
-
-            # find infection events and skips between them
-            timeline[['i_events', 'skips']] = timeline.apply(
-                lambda x : self.__calculate_skips__(x, diagnose=True),
-                axis = 1, result_type = 'expand')
-
-            # for haplotype row create a dataframe of skips and dates
-            for _, row in timeline.iterrows():
-                skip_dataframe.append(self.__arrange_skips__(row, cid))
-
-        return pd.concat(skip_dataframe)
     def __infection_labeller__(self, row, allowedSkips):
         """label infections as true or false"""
         # first visit is always false
@@ -432,24 +414,25 @@ class SeekDeepUtils:
             return True
         else:
             return False
-    def __label_new_infections__(self, skip_df, allowedSkips):
+    def __label_new_infections__(self, allowedSkips):
         """add bool to infection events if they meet skip conditions"""
-        # add visit number to dataframe
-        self.meta = self.meta[self.meta.cohortid.isin(skip_df.cohortid)]
-        self.meta['visit_num']= self.meta.\
+
+        # add visit number to meta data to append to skip dataframe
+        meta = self.meta[self.meta.cohortid.isin(self.skip_df.cohortid)]
+        meta['visit_num']= meta.\
             groupby(['cohortid']).\
             cumcount() + 1
 
         # merge with visit number
-        skip_df = skip_df.merge(
-            self.meta[['cohortid', 'date', 'visit_num']], how = 'left')
+        self.skip_df = self.skip_df.merge(
+            meta[['cohortid', 'date', 'visit_num']], how = 'left')
 
         # label infection event
-        skip_df['infection_event'] = skip_df.apply(
+        self.skip_df['infection_event'] = self.skip_df.apply(
             lambda x : self.__infection_labeller__(x, allowedSkips),
             axis = 1)
 
-        return skip_df
+        return self.skip_df
     def __calculate_skips__(self, row, diagnose=False):
         """
         calculate skips by subtracting i and i-1 elements of True indices
@@ -629,6 +612,25 @@ class SeekDeepUtils:
         self.durations = i_durations[['cohortid', 'h_popUID', 'i_event', 'duration']]
         # return ordered dataframe
         return self.durations
+    def __prepare_skips__(self):
+        """calculates number of skips for each cid~h_popUID at each date"""
+        timelines = self.__all_timelines__()
+
+        skip_dataframe = []
+
+        for cid, timeline in timelines.items():
+
+            # find infection events and skips between them
+            timeline[['i_events', 'skips']] = timeline.apply(
+                lambda x : self.__calculate_skips__(x, diagnose=True),
+                axis = 1, result_type = 'expand')
+
+            # for haplotype row create a dataframe of skips and dates
+            for _, row in timeline.iterrows():
+                skip_dataframe.append(self.__arrange_skips__(row, cid))
+
+        self.skip_df = pd.concat(skip_dataframe)
+        return self.skip_df
     def __prepare_new_infections__(self, cids, hids, new_ifx):
         """prepare new infections dataframe for downstream usage"""
 
@@ -664,32 +666,17 @@ class SeekDeepUtils:
             drop_duplicates().\
             size
         return scalar_exposure
-    def __foi_new_infections__(self, new_infections):
-        """calculate the number of new infections for a given new_infections dataframe"""
-        scalar_new_infections = self.new_infections[['cohortid', 'total_n_infection']].\
-            drop_duplicates().\
-            total_n_infection.\
-            values.\
-            sum()
-        return scalar_new_infections
     def __foi_exposure_duration__(self, sdo):
         """calculate duration in years for a given sdo dataframe"""
         sdo.date = pd.to_datetime(sdo.date, format = '%Y/%m/%d')
         diff = sdo.date.max() - sdo.date.min()
         return diff.days / 365.25
-    def __foi_method_all__(self, sdo, meta, allowedSkips, default):
+    def __foi_method_all__(self):
         """calculate force of infection over the entire dataset"""
-        self.__prepare_sdo__(sdo)
-        meta = self.__prepare_meta__(meta)
-        skip_df = self.__create_skip_dataframe__()
-        skip_df = self.__label_new_infections__(skip_df, allowedSkips)
-
-        self.sdo = self.sdo.merge(skip_df, how='left')
-        self.sdo.date = pd.to_datetime(self.sdo.date, format="%Y-%m-%d")
 
         new_infections = self.sdo.infection_event.sum()
         duration = self.__foi_exposure_duration__(self.sdo)
-        exposure = self.__foi_exposure__(meta)
+        exposure = self.__foi_exposure__(self.meta)
         foi = new_infections / (duration * exposure)
 
         # return params as pandas dataframe
@@ -700,18 +687,10 @@ class SeekDeepUtils:
             'force_of_infection' : [foi]})
 
         return params
-    def __foi_method_month__(self, sdo, meta, allowedSkips, default):
+    def __foi_method_month__(self):
         """calculate force of infection by month"""
-        self.__prepare_sdo__(sdo)
-        meta = self.__prepare_meta__(meta)
-        skip_df = self.__create_skip_dataframe__()
-        skip_df = self.__label_new_infections__(skip_df, allowedSkips)
 
-        self.sdo = self.sdo.merge(skip_df, how='left')
-
-        self.sdo.date = pd.to_datetime(self.sdo.date, format="%Y-%m-%d")
         self.sdo['ym'] = self.sdo.date.dt.to_period('M')
-
 
         monthly_infections = self.sdo.\
             groupby('ym').agg({
@@ -719,12 +698,12 @@ class SeekDeepUtils:
                 'date' : lambda x : (max(x) - min(x)).days / 365.25
                 }).\
             reset_index()
-        monthly_infections['exposure'] = self.__foi_exposure__(meta)
+        monthly_infections['exposure'] = self.__foi_exposure__(self.meta)
         monthly_infections['foi'] = monthly_infections.apply(
             lambda x : x.infection_event / (x.date * x.exposure),
             axis=1)
         return monthly_infections
-    def __foi_method_agecat__(self, sdo, meta, allowedSkips, default):
+    def __foi_method_agecat__(self):
         sdo = self.__prepare_sdo__(sdo)
         self.__prepare_meta__(meta)
 
@@ -764,13 +743,15 @@ class SeekDeepUtils:
         """returns an array of the skips found per cid~haplotype across dates"""
         self.__prepare_sdo__(sdo, controls)
         self.__prepare_meta__(meta)
+        self.__prepare_skips__()
+        return self.skip_df
 
-        timelines = [self.__generate_timeline__(c, boolArray=True) for c in self.sdo.cohortid.unique()]
-        vals = pd.concat([t.apply(
-            lambda x : self.__calculate_skips__(x), axis = 1) for t in timelines])
-
-        vals = np.hstack(vals.values)
-        return vals
+        # timelines = [self.__generate_timeline__(c, boolArray=True) for c in self.sdo.cohortid.unique()]
+        # vals = pd.concat([t.apply(
+        #     lambda x : self.__calculate_skips__(x), axis = 1) for t in timelines])
+        #
+        # vals = np.hstack(vals.values)
+        # return vals
     def Duration_of_Infection(self, sdo, meta, controls=False, allowedSkips = 3, default=15):
         """calculates duration of infections for each cohortid ~ h_popUID"""
         self.__prepare_sdo__(sdo)
@@ -802,43 +783,54 @@ class SeekDeepUtils:
         """calculates number of new infections for each haplotype in each cohortid with allowed skips"""
         self.__prepare_sdo__(sdo, controls)
         self.__prepare_meta__(meta)
+        self.__prepare_skips__()
+        self.__label_new_infections__(allowedSkips)
 
-        # generate timelines for each cohortid~h_popUID
-        timelines = {c : self.__generate_timeline__(c, boolArray=True) for c in self.sdo.cohortid.unique() }#if c == '3149'}
+        return self.skip_df[self.skip_df.infection_event]
 
-        # lists to grow for placement into dataframe
-        cids = []
-        hids = []
-        new_ifx = []
-
-        # iterate through cid~timelines
-        for cohortid, timeline in timelines.items():
-
-            # cut timelines for indices where infection events are found by haplotype
-            haplotypes, dates_found = np.array(np.where(timeline>0)) # 2d arr [[haplotypes found] [dates found]]
-
-            # iterate through haplotypes and calculate number of new infections
-            for h in np.unique(haplotypes):
-
-                # haplotype specific dates
-                dates = dates_found[np.where(haplotypes == h)]
-
-                # calculated number of new infections for haplotype
-                new_infections = self.__haplotype_infections__(dates, allowedSkips)
-
-                # grow lists
-                cids.append(cohortid)
-                hids.append(timeline.index[h])
-                new_ifx.append(new_infections)
-
-        # prepare dataframe for printout
-        self.__prepare_new_infections__(cids, hids, new_ifx)
-        return self.new_infections
+        # # generate timelines for each cohortid~h_popUID
+        # timelines = {c : self.__generate_timeline__(c, boolArray=True) for c in self.sdo.cohortid.unique() }#if c == '3149'}
+        #
+        # # lists to grow for placement into dataframe
+        # cids = []
+        # hids = []
+        # new_ifx = []
+        #
+        # # iterate through cid~timelines
+        # for cohortid, timeline in timelines.items():
+        #
+        #     # cut timelines for indices where infection events are found by haplotype
+        #     haplotypes, dates_found = np.array(np.where(timeline>0)) # 2d arr [[haplotypes found] [dates found]]
+        #
+        #     # iterate through haplotypes and calculate number of new infections
+        #     for h in np.unique(haplotypes):
+        #
+        #         # haplotype specific dates
+        #         dates = dates_found[np.where(haplotypes == h)]
+        #
+        #         # calculated number of new infections for haplotype
+        #         new_infections = self.__haplotype_infections__(dates, allowedSkips)
+        #
+        #         # grow lists
+        #         cids.append(cohortid)
+        #         hids.append(timeline.index[h])
+        #         new_ifx.append(new_infections)
+        #
+        # # prepare dataframe for printout
+        # self.__prepare_new_infections__(cids, hids, new_ifx)
+        # return self.new_infections
     def Force_of_Infection(self, sdo, meta, controls=False, foi_method = 'all', allowedSkips = 3, default=15):
         """calculate force of infection for a dataset"""
+        self.__prepare_sdo__(sdo)
+        self.__prepare_meta__(meta)
+        self.__prepare_skips__()
+        self.__label_new_infections__(allowedSkips)
+        self.sdo = self.sdo.merge(self.skip_df, how='left')
+        self.sdo.date = pd.to_datetime(self.sdo.date, format="%Y-%m-%d")
+
         if foi_method == 'all':
-            return self.__foi_method_all__(sdo, meta, allowedSkips, default)
-        elif foi_method == 'by_month':
-            return self.__foi_method_month__(sdo, meta, allowedSkips, default)
-        elif foi_method == 'by_agecat':
-            self.__foi_method_agecat__(sdo, meta, allowedSkips, default)
+            return self.__foi_method_all__()
+        elif foi_method == 'month':
+            return self.__foi_method_month__()
+        elif foi_method == 'agecat':
+            self.__foi_method_agecat__()
