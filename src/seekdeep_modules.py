@@ -419,6 +419,29 @@ class SeekDeepUtils:
                 skip_dataframe.append(self.__arrange_skips__(row, cid))
 
         return pd.concat(skip_dataframe)
+    def __label_new_infections__(self, skip_df, allowedSkips):
+        """add bool to infection events if they are greater than allowedSkips"""
+        skip_df['infection_event'] = skip_df.apply(
+            lambda x : x.skips > allowedSkips, axis = 1)
+
+        first_infections = self.meta[
+            self.meta.cohortid.isin(skip_df.cohortid)].\
+            groupby(['cohortid']).\
+            head(1)
+
+        skip_df = skip_df.merge(
+            first_infections, how = 'left')
+
+        skip_df['infection_event'] = skip_df.apply(
+            lambda x : True if x.qpcr >= 0 else x.infection_event,
+            axis = 1)
+        skip_df['first_infection'] = skip_df.apply(
+            lambda x : True if x.qpcr >= 0 else False,
+            axis = 1)
+
+        skip_df.drop(columns = 'qpcr', inplace=True)
+
+        return skip_df
     def __calculate_skips__(self, row, diagnose=False):
         """
         calculate skips by subtracting i and i-1 elements of True indices
@@ -673,9 +696,14 @@ class SeekDeepUtils:
         self.__prepare_sdo__(sdo)
         self.__prepare_meta__(meta)
         skip_df = self.__create_skip_dataframe__()
+        skip_df = self.__label_new_infections__(skip_df, allowedSkips)
         self.sdo = self.sdo.merge(skip_df, how='left')
 
-        print(self.sdo)
+        self.sdo.date = pd.to_datetime(self.sdo.date, format='%Y-%m-%d')
+        print(self.sdo.date)
+
+        # for ym in self.sdo.date.to_period('M').unique():
+        #     print(ym)
 
     def __foi_method_agecat__(self, sdo, meta, allowedSkips, default):
         sdo = self.__prepare_sdo__(sdo)
