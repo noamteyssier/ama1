@@ -419,27 +419,36 @@ class SeekDeepUtils:
                 skip_dataframe.append(self.__arrange_skips__(row, cid))
 
         return pd.concat(skip_dataframe)
+    def __infection_labeller(self, row, allowedSkips):
+        """label infections as true or false"""
+        # first visit is always false
+        if row.visit_num == 1:
+            return False
+        # first infection occurs at a timepoint past the allowed skips
+        elif row.skips > allowedSkips :
+            return True
+        # first infection before the skip threshold but there is a gap between
+        #   first visit and first infection
+        elif row.skips > 0 and row.visit_num <= allowedSkips:
+            return True
+        else:
+            return False
     def __label_new_infections__(self, skip_df, allowedSkips):
-        """add bool to infection events if they are greater than allowedSkips"""
-        skip_df['infection_event'] = skip_df.apply(
-            lambda x : x.skips > allowedSkips, axis = 1)
-
-        first_infections = self.meta[
-            self.meta.cohortid.isin(skip_df.cohortid)].\
+        """add bool to infection events if they meet skip conditions"""
+        # add visit number to dataframe
+        self.meta = self.meta[self.meta.cohortid.isin(skip_df.cohortid)]
+        self.meta['visit_num']= self.meta.\
             groupby(['cohortid']).\
-            head(1)
+            cumcount() + 1
 
+        # merge with visit number
         skip_df = skip_df.merge(
-            first_infections, how = 'left')
+            self.meta[['cohortid', 'date', 'visit_num']], how = 'left')
 
+        # label infection event
         skip_df['infection_event'] = skip_df.apply(
-            lambda x : True if x.qpcr >= 0 else x.infection_event,
+            lambda x : self.__infection_labeller(x, allowedSkips),
             axis = 1)
-        skip_df['first_infection'] = skip_df.apply(
-            lambda x : True if x.qpcr >= 0 else False,
-            axis = 1)
-
-        skip_df.drop(columns = 'qpcr', inplace=True)
 
         return skip_df
     def __calculate_skips__(self, row, diagnose=False):
@@ -481,7 +490,10 @@ class SeekDeepUtils:
         return l
     def __arrange_skips__(self, row, cid):
         """create a dataframe from lists created in __calculate_skips__"""
-        row.skips = np.insert(row.skips, 0, 0) # add a zero for the initial infection
+        # add the position of the initial infection as the first skip
+        row.skips = np.insert(row.skips, 0, row.i_events[0])
+
+        # create and return a dataframe
         return pd.DataFrame({
             'cohortid' : cid,
             'h_popUID' : row.name,
@@ -699,11 +711,13 @@ class SeekDeepUtils:
         skip_df = self.__label_new_infections__(skip_df, allowedSkips)
         self.sdo = self.sdo.merge(skip_df, how='left')
 
-        self.sdo.date = pd.to_datetime(self.sdo.date, format='%Y-%m-%d')
-        print(self.sdo.date)
+        self.sdo.date = pd.to_datetime(self.sdo.date, format="%Y-%m-%d")
+        self.sdo['ym'] = self.sdo.date.dt.to_period('M')
 
-        # for ym in self.sdo.date.to_period('M').unique():
-        #     print(ym)
+
+
+        a = self.sdo[['cohortid', 'h_popUID', 'infection_event', 'ym']]
+        b = a.groupby('ym').agg({'infection_event' : 'sum'})
 
     def __foi_method_agecat__(self, sdo, meta, allowedSkips, default):
         sdo = self.__prepare_sdo__(sdo)
