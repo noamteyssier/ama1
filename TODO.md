@@ -40,7 +40,8 @@
 - 4 week intervals instead of months
 - burnin by a value
 - by age category (at clone and person level)
-- by person (not clone level)
+- ~~by person across dataset ~~
+- ~~by person (not clone level)~~
 - by household (not person level)
 
 ## Human Biting Rates
@@ -48,4 +49,4 @@
 - scatterplot of biting rate vs foi
 
 ## Plotting
-- timeline plots with gradient coloring for qpcr 
+- timeline plots with gradient coloring for qpcr
