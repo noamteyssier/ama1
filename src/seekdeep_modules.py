@@ -792,7 +792,7 @@ class SeekDeepUtils:
         self.__prepare_skips__()
         self.__label_new_infections__(allowedSkips)
 
-        return self.skip_df[self.skip_df.infection_event]
+        return self.skip_df
 
         # # generate timelines for each cohortid~h_popUID
         # timelines = {c : self.__generate_timeline__(c, boolArray=True) for c in self.sdo.cohortid.unique() }#if c == '3149'}
