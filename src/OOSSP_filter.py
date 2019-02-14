@@ -21,10 +21,14 @@ def get_args():
         help = 'visualize minority haplotype population with different color schemes [fraction, occurence, density]')
     args = p.parse_args()
 
+    # if no args given print help
+    if len(sys.argv) == 1:
+        p.print_help(sys.stderr)
+        sys.exit(1)
+        
     if args.filter and args.plot_graph:
         sys.exit('Error : Please choose to filter OR to visualize')
-    if not args.filter and not args.plot_graph:
-        sys.exit('Error : Please choose an option to filter OR to visualize')
+
 
     return args
 def main():

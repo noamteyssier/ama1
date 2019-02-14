@@ -4,7 +4,6 @@ import pandas as pd
 import numpy as np
 import itertools
 import sys
-# from ggplot import *
 import seaborn as sns
 import matplotlib.pyplot as plt
 
@@ -259,47 +258,54 @@ class HaplotypeUtils:
             return self.oossp
     def PlotOOSSP(self, vlines, hlines, color_type):
         self.__oossp__()
-
-        if not color_type:
-            color_type == 'fraction'
-
         if color_type == 'fraction':
             self.oossp[['c_Fraction', 'c_Ratio']] = self.oossp.\
                 apply(lambda x : self.__flag_hvlines__(x, vlines, hlines),
                 result_type = 'expand', axis = 1)
 
-            g = ggplot(self.oossp, aes(x = 'h2_fraction', y = 'majorRatio', color = 'c_Fraction')) +\
-                geom_point() +\
-                geom_vline(x = vlines, linetype = 'dashed', color = 'grey') +\
-                geom_hline(y = hlines, linetype = 'dashed', color = 'grey') +\
-                theme_bw()
-            print(g)
+            sns.scatterplot(
+                data=self.oossp,
+                x='h2_fraction',
+                y = 'majorRatio',
+                hue = 'c_Fraction',
+                s = 100)
+
+            [plt.axvline(i, color = 'darkslategray', linestyle='dashed') for i in vlines]
+            [plt.axhline(j, color = 'peru', linestyle='dashed') for j in hlines]
+            plt.show()
         elif color_type == 'occurence':
             self.__haplotype_occurence__()
             self.oossp['h2_occurence'] = self.oossp.apply(
                 lambda x : self.__flag_occurence__(x), axis = 1)
 
-            g = ggplot(self.oossp, aes(x = 'h2_fraction', y = 'majorRatio', color = 'h2_occurence')) +\
-                geom_point(size = 40, alpha = 0.8) +\
-                geom_vline(x = vlines, linetype = 'dashed', color = 'grey') +\
-                geom_hline(y = hlines, linetype = 'dashed', color = 'grey') +\
-                theme_bw() +\
-                scale_color_manual(values = ['peru', 'red', 'blue', 'green', 'black'])
-            print(g)
+            sns.scatterplot(
+                data=self.oossp,
+                x= 'h2_fraction',
+                y = 'majorRatio',
+                hue = 'h2_occurence',
+                alpha=0.5,
+                s = 100)
+
+            [plt.axvline(i, color = 'darkslategray', linestyle='dashed') for i in vlines]
+            [plt.axhline(j, color = 'peru', linestyle='dashed') for j in hlines]
+            plt.show()
         elif color_type == 'density':
             self.__load_meta__()
             self.oossp = self.oossp.merge(self.meta[['s_Sample', 'qpcr']])
             self.oossp = self.oossp[self.oossp.qpcr > 0]
             self.oossp['log10_qpcr'] = self.oossp.apply(
-                lambda x : self.__flag_qpcr__(x.qpcr), axis = 1)
+                lambda x : np.log10(x.qpcr), axis = 1)
 
-            g = ggplot(self.oossp, aes(x = 'h2_fraction', y = 'majorRatio', color = 'log10_qpcr')) +\
-                geom_point(size = 50, alpha = 0.5) +\
-                geom_vline(x = vlines, linetype = 'dashed', color = 'grey') +\
-                geom_hline(y = hlines, linetype = 'dashed', color = 'grey') +\
-                theme_bw() +\
-                scale_color_manual(values = ['peru', 'red', 'blue', 'green', 'black'])
-            print(g)
+            sns.scatterplot(
+                data=self.oossp,
+                x='h2_fraction',
+                y = 'majorRatio',
+                hue = 'log10_qpcr',
+                s = 100)
+
+            [plt.axvline(i, color = 'darkslategray', linestyle='dashed') for i in vlines]
+            [plt.axhline(j, color = 'peru', linestyle='dashed') for j in hlines]
+            plt.show()
     def FilterOOSSP(self, ratio = 50, pc = 0.01):
         """apply filter of maj/min pc ratio on one-off haplotypes in the same sample"""
         self.__oossp__()
