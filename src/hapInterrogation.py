@@ -5,9 +5,10 @@ import pandas as pd
 import numpy as np
 import argparse
 from seekdeep_modules import SeekDeepUtils
-import sys
 import seaborn as sns
 import matplotlib.pyplot as plt
+import sys
+import os
 
 def get_args():
     p = argparse.ArgumentParser()
@@ -26,14 +27,11 @@ def get_args():
     p.add_argument('-d', '--durations', action='store_true',
         help="Create a dataframe showing the duration of infection of each cohortid~h_popUID")
     p.add_argument('-f', '--force_of_infection', type=str,
-        help="Calculate the Force of Infection of the Population [all, by_month, by_agecat, by_month_agecat]")
+        help="Calculate the Force of Infection of the Population [all, month, agecat, month_agecat, person]")
     p.add_argument('-n', '--num_skips', default = 3, type=int,
         help="Number of allowed skips to allow during calculation of durations (default = 3 skips)")
     p.add_argument('-x', '--default_duration', default=15, type=int,
         help="Default duration rate to use for single event infections (default = 15 days)")
-    p.add_argument('-b', '--plot_foi', action='store_true',
-        help='plot the molecular force of infection by month')
-
 
     # if no args given print help
     if len(sys.argv) == 1:
@@ -45,9 +43,6 @@ def get_args():
 def print_out(df):
     """simple printout for a pandas dataframe to stdout"""
     df.to_csv(sys.stdout, sep="\t", index=False)
-def plot_out(df):
-    sns.lineplot(data=df, x = 'ym', y = 'foi')
-    plt.show()
 
 def main():
     args = get_args()
@@ -86,10 +81,7 @@ def main():
             foi_method=args.force_of_infection,
             allowedSkips=args.num_skips,
             default=args.default_duration)
-        if not args.plot_foi:
-            return print_out(foi_params)
-        else:
-            return plot_out(foi_params)
+        # return print_out(foi_params)
 
 
 if __name__ == '__main__':

@@ -677,6 +677,17 @@ class SeekDeepUtils:
         sdo.date = pd.to_datetime(sdo.date, format = '%Y/%m/%d')
         diff = sdo.date.max() - sdo.date.min()
         return diff.days / 365.25
+    def __foi_collapse_infection_by_person__(self):
+        """collapse infections of a person_datetime to a single value"""
+        personal_infection = self.sdo.\
+            groupby('s_Sample').\
+            agg({'infection_event' : 'max'})
+        self.sdo['person_infection'] = self.sdo.apply(
+            lambda x : personal_infection.infection_event[x.s_Sample], axis = 1)
+        self.sdo = self.sdo[
+            ['s_Sample', 'date', 'cohortid', 'visit_num', 'person_infection']
+            ].\
+            drop_duplicates()
     def __foi_method_all__(self):
         """calculate force of infection over the entire dataset"""
 
@@ -694,10 +705,8 @@ class SeekDeepUtils:
 
         return params
     def __foi_method_month__(self):
-        """calculate force of infection by month"""
-
+        """calculate force of infection by month and by clone"""
         self.sdo['ym'] = self.sdo.date.dt.to_period('M')
-
         monthly_infections = self.sdo.\
             groupby('ym').agg({
                 'infection_event' : 'sum',
@@ -714,6 +723,24 @@ class SeekDeepUtils:
         self.__prepare_meta__(meta)
 
         print(sdo)
+    def __foi_method_individual__(self):
+        """calculate foi by person-infection and not clone infection"""
+        self.__foi_collapse_infection_by_person__()
+        self.sdo['ym'] = self.sdo.date.dt.to_period('M')
+
+        monthly_infections = self.sdo.\
+            groupby('ym').agg({
+                'person_infection' : 'sum',
+                'date' : lambda x : (max(x) - min(x)).days / 365.25
+                }).\
+            reset_index()
+        monthly_infections['exposure'] = self.__foi_exposure__(self.meta)
+        monthly_infections['foi'] = monthly_infections.apply(
+            lambda x : x.person_infection / (x.date * x.exposure),
+            axis=1)
+        return monthly_infections
+    def __foi_method_person__(self):
+        print(self.sdo)
     def fix_filtered_SDO(self, sdo):
         """recalculates attributes of SeekDeep output dataframe post-filtering"""
         self.sdo = sdo
@@ -840,3 +867,7 @@ class SeekDeepUtils:
             return self.__foi_method_month__()
         elif foi_method == 'agecat':
             self.__foi_method_agecat__()
+        elif foi_method == 'individual':
+            return self.__foi_method_individual__()
+        elif foi_method == 'person':
+            self.__foi_method_person__()
