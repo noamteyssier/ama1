@@ -4,7 +4,7 @@ import pandas as pd
 import numpy as np
 import itertools
 import sys
-from ggplot import *
+# from ggplot import *
 import seaborn as sns
 import matplotlib.pyplot as plt
 
@@ -419,7 +419,7 @@ class SeekDeepUtils:
                 skip_dataframe.append(self.__arrange_skips__(row, cid))
 
         return pd.concat(skip_dataframe)
-    def __infection_labeller(self, row, allowedSkips):
+    def __infection_labeller__(self, row, allowedSkips):
         """label infections as true or false"""
         # first visit is always false
         if row.visit_num == 1:
@@ -427,8 +427,7 @@ class SeekDeepUtils:
         # first infection occurs at a timepoint past the allowed skips
         elif row.skips > allowedSkips :
             return True
-        # first infection before the skip threshold but there is a gap between
-        #   first visit and first infection
+        # first infection before the skip threshold but there is a gap between first visit and first infection
         elif row.skips > 0 and row.visit_num <= allowedSkips:
             return True
         else:
@@ -447,7 +446,7 @@ class SeekDeepUtils:
 
         # label infection event
         skip_df['infection_event'] = skip_df.apply(
-            lambda x : self.__infection_labeller(x, allowedSkips),
+            lambda x : self.__infection_labeller__(x, allowedSkips),
             axis = 1)
 
         return skip_df
@@ -681,44 +680,50 @@ class SeekDeepUtils:
     def __foi_method_all__(self, sdo, meta, allowedSkips, default):
         """calculate force of infection over the entire dataset"""
         self.__prepare_sdo__(sdo)
-        self.__prepare_meta__(meta)
+        meta = self.__prepare_meta__(meta)
+        skip_df = self.__create_skip_dataframe__()
+        skip_df = self.__label_new_infections__(skip_df, allowedSkips)
 
-        self.New_Infections(
-            self.sdo, self.meta,
-            allowedSkips=allowedSkips)
+        self.sdo = self.sdo.merge(skip_df, how='left')
+        self.sdo.date = pd.to_datetime(self.sdo.date, format="%Y-%m-%d")
 
-        # create parameters of foi
-        scalar_exposure = self.__foi_exposure__(self.meta)
-        scalar_exposure_duration = self.__foi_exposure_duration__(self.sdo)
-        scalar_new_infections = self.__foi_new_infections__(self.new_infections)
-
-        # calculate foi
-        foi = scalar_new_infections / (scalar_exposure * scalar_exposure_duration)
+        new_infections = self.sdo.infection_event.sum()
+        duration = self.__foi_exposure_duration__(self.sdo)
+        exposure = self.__foi_exposure__(meta)
+        foi = new_infections / (duration * exposure)
 
         # return params as pandas dataframe
         params = pd.DataFrame({
-            'new_infections' : [scalar_new_infections],
-            'duration' : [scalar_exposure_duration],
-            'exposure' : [scalar_exposure],
+            'infection_event' : [new_infections],
+            'duration' : [duration],
+            'exposure' : [exposure],
             'force_of_infection' : [foi]})
 
         return params
     def __foi_method_month__(self, sdo, meta, allowedSkips, default):
         """calculate force of infection by month"""
         self.__prepare_sdo__(sdo)
-        self.__prepare_meta__(meta)
+        meta = self.__prepare_meta__(meta)
         skip_df = self.__create_skip_dataframe__()
         skip_df = self.__label_new_infections__(skip_df, allowedSkips)
+
         self.sdo = self.sdo.merge(skip_df, how='left')
 
         self.sdo.date = pd.to_datetime(self.sdo.date, format="%Y-%m-%d")
         self.sdo['ym'] = self.sdo.date.dt.to_period('M')
 
 
-
-        a = self.sdo[['cohortid', 'h_popUID', 'infection_event', 'ym']]
-        b = a.groupby('ym').agg({'infection_event' : 'sum'})
-
+        monthly_infections = self.sdo.\
+            groupby('ym').agg({
+                'infection_event' : 'sum',
+                'date' : lambda x : (max(x) - min(x)).days / 365.25
+                }).\
+            reset_index()
+        monthly_infections['exposure'] = self.__foi_exposure__(meta)
+        monthly_infections['foi'] = monthly_infections.apply(
+            lambda x : x.infection_event / (x.date * x.exposure),
+            axis=1)
+        return monthly_infections
     def __foi_method_agecat__(self, sdo, meta, allowedSkips, default):
         sdo = self.__prepare_sdo__(sdo)
         self.__prepare_meta__(meta)

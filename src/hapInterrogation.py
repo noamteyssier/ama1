@@ -81,7 +81,7 @@ def main():
             foi_method=args.force_of_infection,
             allowedSkips=args.num_skips,
             default=args.default_duration)
-        # return print_out(foi_params)
+        return print_out(foi_params)
 
 
 if __name__ == '__main__':
