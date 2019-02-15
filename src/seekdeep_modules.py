@@ -688,6 +688,31 @@ class SeekDeepUtils:
             ['s_Sample', 'date', 'cohortid', 'visit_num', 'person_infection']
             ].\
             drop_duplicates()
+    def __foi_cid_duration_from_first_inf__(self):
+        """find duration of each cid from first infection to last visit in years"""
+        first_infections = self.sdo[self.sdo.infection_event == True].\
+            groupby('cohortid').\
+            head(1)[['cohortid', 'date']].\
+            rename(columns = {'date' : 'first_infection'})
+
+        last_visits = self.meta.\
+            groupby('cohortid').\
+            tail(1)[['cohortid', 'date']].\
+            rename(columns = {'date' : 'last_visit'})
+
+        self.cid_dates = first_infections.\
+            merge(last_visits, how = 'left')
+        self.cid_dates['first_infection'] = pd.to_datetime(
+            self.cid_dates['first_infection'], format='%Y-%m-%d')
+        self.cid_dates['last_visit'] = pd.to_datetime(
+            self.cid_dates['last_visit'], format='%Y-%m-%d')
+
+
+        self.cid_dates['duration'] = self.cid_dates.apply(
+            lambda x : (x.last_visit - x.first_infection).days / 365.25,
+            axis = 1)
+
+        return self.cid_dates
     def __foi_method_all__(self):
         """calculate force of infection over the entire dataset"""
 
@@ -752,17 +777,19 @@ class SeekDeepUtils:
         cid_infections = self.sdo.\
             groupby(['cohortid']).agg({
                 'infection_event' : 'sum',
-                'date' : lambda x : (max(x) - min(x)).days / 356.25
             }).\
             reset_index()
 
-        # convert single infection events into a default rate
-        cid_infections['date'] = cid_infections.apply(
-            lambda x : 15/356.25 if x.date == 0 else x.date, axis = 1)
-
+        # merge cid dates with cid infections and fill single infections to 0
+        self.cid_dates = self.__foi_cid_duration_from_first_inf__()
+        cid_infections = cid_infections.\
+            merge(self.cid_dates, how='left').\
+            drop(columns = ['first_infection', 'last_visit']).\
+            fillna(0)
+            
         # calculate force of infection
         cid_infections['foi'] = cid_infections.apply(
-            lambda x : x.infection_event / x.date, axis = 1)
+            lambda x : x.infection_event / x.duration if x.duration > 0 else 0, axis = 1)
 
         return cid_infections
     def fix_filtered_SDO(self, sdo):
