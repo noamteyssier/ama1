@@ -739,8 +739,16 @@ class SeekDeepUtils:
             lambda x : x.person_infection / (x.date * x.exposure),
             axis=1)
         return monthly_infections
-    def __foi_method_person__(self):
+    def __foi_method_person__(self, individual=False):
         """calculate force of infection for each person"""
+
+        # calculate infections with collapsed haplotype infection events
+        if individual == True:
+            self.__foi_collapse_infection_by_person__()
+            self.sdo = self.sdo.\
+                rename(columns = {'person_infection' : 'infection_event'})
+
+        # calculate infection events by cohortid
         cid_infections = self.sdo.\
             groupby(['cohortid']).agg({
                 'infection_event' : 'sum',
@@ -883,9 +891,11 @@ class SeekDeepUtils:
             return self.__foi_method_month__()
         elif foi_method == 'agecat':
             self.__foi_method_agecat__()
-        elif foi_method == 'individual':
+        elif foi_method == 'month_individual':
             return self.__foi_method_individual__()
-        elif foi_method == 'person':
-            return self.__foi_method_person__()
+        elif foi_method == 'cid':
+            return self.__foi_method_person__(individual=False)
+        elif foi_method == 'cid_individual':
+            return self.__foi_method_person__(individual=True)
         else:
             sys.exit('Error : FOI method "{0}" not recognized'.format(foi_method))

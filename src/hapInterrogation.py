@@ -13,7 +13,7 @@ import os
 def get_args():
     p = argparse.ArgumentParser()
     p.add_argument('-i', '--seekdeep_output', required=False,
-        default="../prism2/full_prism2/pfama1_sampInfo.tab.txt",
+        default="../prism2/full_prism2/filtered_5pc_10r.tab",
         help="SeekDeep Output to use as input to functions")
     p.add_argument('-m', '--meta', required=False,
         default= "../prism2/stata/allVisits.dta",
@@ -27,7 +27,7 @@ def get_args():
     p.add_argument('-d', '--durations', action='store_true',
         help="Create a dataframe showing the duration of infection of each cohortid~h_popUID")
     p.add_argument('-f', '--force_of_infection', type=str,
-        help="Calculate the Force of Infection of the Population [all, month, agecat, month_agecat, person]")
+        help="Calculate the Force of Infection of the Population [all, month, month_individual, cid, cid_individual]")
     p.add_argument('-n', '--num_skips', default = 3, type=int,
         help="Number of allowed skips to allow during calculation of durations (default = 3 skips)")
     p.add_argument('-x', '--default_duration', default=15, type=int,
