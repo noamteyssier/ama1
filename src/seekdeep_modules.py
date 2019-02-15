@@ -687,7 +687,8 @@ class SeekDeepUtils:
         self.sdo = self.sdo[
             ['s_Sample', 'date', 'cohortid', 'visit_num', 'person_infection']
             ].\
-            drop_duplicates()
+            drop_duplicates().\
+            rename(columns = {'person_infection' : 'infection_event'})
     def __foi_cid_duration_from_first_inf__(self):
         """find duration of each cid from first infection to last visit in years"""
         first_infections = self.sdo[self.sdo.infection_event == True].\
@@ -729,8 +730,11 @@ class SeekDeepUtils:
             'force_of_infection' : [foi]})
 
         return params
-    def __foi_method_month__(self):
+    def __foi_method_month__(self, individual=False):
         """calculate force of infection by month and by clone"""
+        if individual == True:
+            self.__foi_collapse_infection_by_person__()
+
         self.sdo['ym'] = self.sdo.date.dt.to_period('M')
         monthly_infections = self.sdo.\
             groupby('ym').agg({
@@ -743,35 +747,12 @@ class SeekDeepUtils:
             lambda x : x.infection_event / (x.date * x.exposure),
             axis=1)
         return monthly_infections
-    def __foi_method_agecat__(self):
-        sdo = self.__prepare_sdo__(sdo)
-        self.__prepare_meta__(meta)
-
-        print(sdo)
-    def __foi_method_individual__(self):
-        """calculate foi by person-infection and not clone infection"""
-        self.__foi_collapse_infection_by_person__()
-        self.sdo['ym'] = self.sdo.date.dt.to_period('M')
-
-        monthly_infections = self.sdo.\
-            groupby('ym').agg({
-                'person_infection' : 'sum',
-                'date' : lambda x : (max(x) - min(x)).days / 365.25
-                }).\
-            reset_index()
-        monthly_infections['exposure'] = self.__foi_exposure__(self.meta)
-        monthly_infections['foi'] = monthly_infections.apply(
-            lambda x : x.person_infection / (x.date * x.exposure),
-            axis=1)
-        return monthly_infections
     def __foi_method_person__(self, individual=False):
         """calculate force of infection for each person"""
 
         # calculate infections with collapsed haplotype infection events
         if individual == True:
             self.__foi_collapse_infection_by_person__()
-            self.sdo = self.sdo.\
-                rename(columns = {'person_infection' : 'infection_event'})
 
         # calculate infection events by cohortid
         cid_infections = self.sdo.\
@@ -786,7 +767,7 @@ class SeekDeepUtils:
             merge(self.cid_dates, how='left').\
             drop(columns = ['first_infection', 'last_visit']).\
             fillna(0)
-            
+
         # calculate force of infection
         cid_infections['foi'] = cid_infections.apply(
             lambda x : x.infection_event / x.duration if x.duration > 0 else 0, axis = 1)
@@ -916,10 +897,8 @@ class SeekDeepUtils:
             return self.__foi_method_all__()
         elif foi_method == 'month':
             return self.__foi_method_month__()
-        elif foi_method == 'agecat':
-            self.__foi_method_agecat__()
         elif foi_method == 'month_individual':
-            return self.__foi_method_individual__()
+            return self.__foi_method_month__(individual=True)
         elif foi_method == 'cid':
             return self.__foi_method_person__(individual=False)
         elif foi_method == 'cid_individual':
