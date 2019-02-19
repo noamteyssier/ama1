@@ -29,7 +29,7 @@
 - haplodrop graph: need to have empty circles for when there is a visit but a qPCR value of zero
 
 ## Epi
-- ~~ generate stats on gap length by haplotype ~~
+- ~~generate stats on gap length by haplotype~~
 
 ## Meeting Notes
 - check if replicates function properly when one of the pairs has zero reads with SeekDeep
@@ -39,8 +39,8 @@
 ## FOI
 - 4 week intervals instead of months
 - burnin by a value
-- by age category (at clone and person level)
-- ~~by person across dataset ~~
+- ~~by age category (at clone and person level)~~
+- ~~by person across dataset~~
 - ~~by person (not clone level)~~
 - by household (not person level)
 
