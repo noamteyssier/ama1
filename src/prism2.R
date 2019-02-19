@@ -7,7 +7,7 @@ setwd("~/bin/ama1/prism2")
 
 
 cohort_meta <- read.dta13("stata/allVisits.dta")
-seekdeep <- read_tsv("full_prism2/pfama1_sampInfo.tab.txt")
+seekdeep <- read_tsv("full_prism2/filtered_5pc_10r.tab")
 vcf <- read_tsv("full_prism2/pfama1.vcf", skip = 3)
 snpdist <- read_tsv("full_prism2/pfama1.dist")
 snpdb <- read_tsv("data/ama1_snpInfo.db.tab")
@@ -413,10 +413,11 @@ cohort_meta <- cohort_meta %>%
 
 # merge prism2 data with cohort meta
 prism2 <- prism2 %>%
-  inner_join(cohort_meta)
+  right_join(cohort_meta)
 
 # calculate number of infection events by cohortid
 prism2 <- prism2 %>%
+  filter(is.na(h_popUID) == FALSE) %>%
   select(date, cohortid) %>%
   unique() %>%
   group_by(cohortid) %>%
