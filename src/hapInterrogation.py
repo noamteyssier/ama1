@@ -26,6 +26,8 @@ def get_args():
         help='Create a dataframe for the number of new infections of cohortid~h_popUID')
     p.add_argument('-d', '--durations', action='store_true',
         help="Create a dataframe showing the duration of infection of each cohortid~h_popUID")
+    p.add_argument('-l', '--old_new_infections', action='store_true',
+        help="Create a dataframe showing the start and end of infection of each cohortid~h_popUID")
     p.add_argument('-f', '--force_of_infection', type=str,
         help="Calculate the Force of Infection of the Population [all, month, month_individual, cid, cid_individual]")
     p.add_argument('-n', '--num_skips', default = 3, type=int,
@@ -69,6 +71,14 @@ def main():
             allowedSkips = args.num_skips,
             default=args.default_duration)
         return print_out(durations)
+
+    # calculate start and end of infections
+    elif args.old_new_infections:
+        onl = s.Old_New_Infection_Labels(
+            sdo, meta,
+            allowedSkips = args.num_skips,
+            default=args.default_duration)
+        return print_out(onl)
 
     elif args.new_infections:
         new_infections = s.New_Infections(

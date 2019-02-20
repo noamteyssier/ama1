@@ -773,6 +773,21 @@ class SeekDeepUtils:
             lambda x : x.infection_event / x.duration if x.duration > 0 else 0, axis = 1)
 
         return cid_infections
+    def __label_haplotype_infection_type__(self, group):
+        """for each new infection past the burnin assign all following haplotype events as new infections"""
+        # find infection events past the burnin
+        group['true_new'] = group.apply(
+            lambda x : True if (x.infection_event > 0) & (x.date >= self.burnin) else False,
+            axis = 1)
+
+        # find if there are any new infections past the burnin
+        true_news = np.where(group.true_new.values > 0)[0]
+
+        # if so, label all following haplotype events as so
+        if len(true_news) > 0:
+            group.iloc[true_news.min():, -1] = True
+
+        return group
     def fix_filtered_SDO(self, sdo):
         """recalculates attributes of SeekDeep output dataframe post-filtering"""
         self.sdo = sdo
@@ -844,6 +859,20 @@ class SeekDeepUtils:
         self.durations = self.__prepare_durations__(i_durations)
 
         return self.durations
+    def Old_New_Infection_Labels(self, sdo, meta, controls=False, allowedSkips = 3, default=15, burnin='2018-01-01'):
+        self.__prepare_sdo__(sdo, controls)
+        self.__prepare_meta__(meta)
+        self.__prepare_skips__()
+        self.__label_new_infections__(allowedSkips)
+
+        self.skip_df.date = pd.to_datetime(self.skip_df.date)
+        self.burnin = pd.to_datetime(burnin)
+
+        hit_labels = self.skip_df.\
+            groupby(['cohortid', 'h_popUID']).\
+            apply(lambda x : self.__label_haplotype_infection_type__(x))
+
+        return hit_labels
     def New_Infections(self, sdo, meta, controls=False, allowedSkips = 3):
         """calculates number of new infections for each haplotype in each cohortid with allowed skips"""
         self.__prepare_sdo__(sdo, controls)
