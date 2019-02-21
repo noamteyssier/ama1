@@ -70,12 +70,9 @@ a script to fit models to estimate probability of recovery and sensitivity of de
 - will filter out dates of non-routine visits unless malaria episode was recorded
 
 ```bash
-# example usage
+# example usage, run timeline using only MS model on default filtered set
 cd src/
-./fitTimeline.py \
-  -i ../prism2/data/filtered_prism2.tab.txt \
-  -c ../prism2/stata/allVisits.dta \
-  --seed 42
+./fitTimeline.py -m ms --seed 42
 ```
 
 ## prism2
@@ -95,21 +92,24 @@ An R script to generate visualizations of interest to the project. Names to file
 - python - numpy-1.15.4
 - python - pandas-0.24.1
 - python - scipy-1.2.0
+- python - seaborn-0.9.0
 - R - tidyverse
 - R - readstata13
 - R - tidygraph
 - R - ggraph
+- R - rgdal
+- R - ggmap
 - clustal-omega : http://www.clustal.org/omega/#Download
 - snp-sites : https://github.com/sanger-pathogens/snp-sites
 - snp-dists : https://github.com/tseemann/snp-dists
 
 ```bash
 # command line
-pip install numpy pandas scipy ggplot --user
+pip install pandas scipy numpy seaborn --user
 ```
 ```R
 # in R
-install.packages(c('tidyverse','readstata13','tidygraph','ggraph'))
+install.packages(c('tidyverse','readstata13','tidygraph','ggraph', 'rgdal', 'ggmap'))
 ```
 
 #### fixMeta
