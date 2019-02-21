@@ -825,13 +825,6 @@ class SeekDeepUtils:
         self.__prepare_meta__(meta)
         self.__prepare_skips__()
         return self.skip_df
-
-        # timelines = [self.__generate_timeline__(c, boolArray=True) for c in self.sdo.cohortid.unique()]
-        # vals = pd.concat([t.apply(
-        #     lambda x : self.__calculate_skips__(x), axis = 1) for t in timelines])
-        #
-        # vals = np.hstack(vals.values)
-        # return vals
     def Duration_of_Infection(self, sdo, meta, controls=False, allowedSkips = 3, default=15):
         """calculates duration of infections for each cohortid ~ h_popUID"""
         self.__prepare_sdo__(sdo)
@@ -860,6 +853,7 @@ class SeekDeepUtils:
 
         return self.durations
     def Old_New_Infection_Labels(self, sdo, meta, controls=False, allowedSkips = 3, default=15, burnin='2018-01-01'):
+        """labels cid~hid infections that developed past a burn-in date as new else old"""
         self.__prepare_sdo__(sdo, controls)
         self.__prepare_meta__(meta)
         self.__prepare_skips__()
@@ -881,38 +875,6 @@ class SeekDeepUtils:
         self.__label_new_infections__(allowedSkips)
 
         return self.skip_df
-
-        # # generate timelines for each cohortid~h_popUID
-        # timelines = {c : self.__generate_timeline__(c, boolArray=True) for c in self.sdo.cohortid.unique() }#if c == '3149'}
-        #
-        # # lists to grow for placement into dataframe
-        # cids = []
-        # hids = []
-        # new_ifx = []
-        #
-        # # iterate through cid~timelines
-        # for cohortid, timeline in timelines.items():
-        #
-        #     # cut timelines for indices where infection events are found by haplotype
-        #     haplotypes, dates_found = np.array(np.where(timeline>0)) # 2d arr [[haplotypes found] [dates found]]
-        #
-        #     # iterate through haplotypes and calculate number of new infections
-        #     for h in np.unique(haplotypes):
-        #
-        #         # haplotype specific dates
-        #         dates = dates_found[np.where(haplotypes == h)]
-        #
-        #         # calculated number of new infections for haplotype
-        #         new_infections = self.__haplotype_infections__(dates, allowedSkips)
-        #
-        #         # grow lists
-        #         cids.append(cohortid)
-        #         hids.append(timeline.index[h])
-        #         new_ifx.append(new_infections)
-        #
-        # # prepare dataframe for printout
-        # self.__prepare_new_infections__(cids, hids, new_ifx)
-        # return self.new_infections
     def Force_of_Infection(self, sdo, meta, controls=False, foi_method = 'all', allowedSkips = 3, default=15):
         """calculate force of infection for a dataset"""
         self.__prepare_sdo__(sdo)
