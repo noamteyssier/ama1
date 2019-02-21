@@ -252,11 +252,13 @@ class Timeline:
 def get_args():
     """handles arguments, returns args"""
     p = argparse.ArgumentParser()
-    p.add_argument("-i", '--seekdeep_input', required=True,
+    p.add_argument("-i", '--seekdeep_input',
+        default="../prism2/full_prism2/filtered_5pc_10r.tab",
         help = 'output of SeekDeep to fit model on')
-    p.add_argument('-c', '--cohort_meta', required=True,
+    p.add_argument('-c', '--cohort_meta',
+        default="../prism2/stata/allVisits.dta",
         help = '.dta statabase13 meta data for SeekDeep samples')
-    p.add_argument('-m', '--model',
+    p.add_argument('-m', '--model', required=True,
         help = 'model to use [ms, aq]')
     p.add_argument('-n', '--event_size', default=3,
         help = 'event window size to use (default = 3)')
@@ -265,6 +267,12 @@ def get_args():
     p.add_argument('-p', '--print_histogram', action='store_true',
         help = 'print histogram of n-lets found and exit')
     args = p.parse_args()
+
+    # if no args given print help
+    if len(sys.argv) == 1:
+        p.print_help(sys.stderr)
+        sys.exit(1)
+
     args.event_size = int(args.event_size)
     return args
 def main(args):
