@@ -569,7 +569,7 @@ class SeekDeepUtils:
         return [date, cid]
     def __prepare_meta__(self, meta):
         """prepare meta data for usage in timeline generation"""
-        self.meta = meta[['date', 'cohortid', 'qpcr']]
+        self.meta = meta[['date', 'cohortid', 'qpcr', 'agecat']]
         self.meta['date'] = self.meta['date'].astype('str')
         self.meta['cohortid'] = self.meta['cohortid'].astype('str')
         self.meta.sort_values(by='date', inplace=True)
@@ -666,6 +666,13 @@ class SeekDeepUtils:
             ['cohortid', 'total_n_infection', 'h_popUID', 'n_infection']]
 
         return self.new_infections
+    def __add_agecat_to_sdo__(self):
+        """add agecategories to seekdeep dataframe"""
+        age_categories = self.meta.\
+            groupby('cohortid').\
+            tail(1)[['cohortid', 'agecat']]
+
+        self.sdo = self.sdo.merge(age_categories, how='left')
     def __foi_exposure__(self, meta):
         """calculate exposure for a given sdo dataframe"""
         scalar_exposure = meta['cohortid'].\
@@ -731,18 +738,36 @@ class SeekDeepUtils:
             'force_of_infection' : [foi]})
 
         return params
-    def __foi_method_month__(self, individual=False):
+    def __foi_method_month__(self, individual=False, agecat=False):
         """calculate force of infection by month and by clone"""
+        relevant_columns = ['cohortid', 'date', 'h_popUID', 'infection_event']
+        groupby_columns = ['ym']
+
+        # collapse all clones to a single infection event at a date
         if individual == True:
             self.__foi_collapse_infection_by_person__()
+            relevant_columns = ['cohortid', 'date', 'infection_event']
 
+        # collapse infections
+        if agecat == True:
+            self.__add_agecat_to_sdo__()
+            groupby_columns = ['ym', 'agecat']
+
+        # merge with all cohortids for accurate population FOI
+        self.sdo = self.sdo[relevant_columns].\
+            merge(self.meta, how = 'right').\
+            fillna(value={'infection_event' : False})
+
+        # groupby month (and optionally agecat) for infection event sum
         self.sdo['ym'] = self.sdo.date.dt.to_period('M')
         monthly_infections = self.sdo.\
-            groupby('ym').agg({
+            groupby(groupby_columns).agg({
                 'infection_event' : 'sum',
                 'date' : lambda x : (max(x) - min(x)).days / 365.25
                 }).\
             reset_index()
+
+        # calculate FOI
         monthly_infections['exposure'] = self.__foi_exposure__(self.meta)
         monthly_infections['foi'] = monthly_infections.apply(
             lambda x : x.infection_event / (x.date * x.exposure),
@@ -898,6 +923,10 @@ class SeekDeepUtils:
             return self.__foi_method_month__()
         elif foi_method == 'month_individual':
             return self.__foi_method_month__(individual=True)
+        elif foi_method == 'month_agecat':
+            return self.__foi_method_month__(agecat=True)
+        elif foi_method == 'month_individual_agecat':
+            return self.__foi_method_month__(individual=True, agecat=True)
         elif foi_method == 'cid':
             return self.__foi_method_person__(individual=False)
         elif foi_method == 'cid_individual':
