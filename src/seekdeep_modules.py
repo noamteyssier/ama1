@@ -685,32 +685,33 @@ class SeekDeepUtils:
         self.sdo['person_infection'] = self.sdo.apply(
             lambda x : personal_infection.infection_event[x.s_Sample], axis = 1)
         self.sdo = self.sdo[
-            ['s_Sample', 'date', 'cohortid', 'visit_num', 'person_infection']
-            ].\
+            ['s_Sample', 'date', 'cohortid', 'visit_num', 'person_infection']].\
             drop_duplicates().\
             rename(columns = {'person_infection' : 'infection_event'})
-    def __foi_cid_duration_from_first_inf__(self):
-        """find duration of each cid from first infection to last visit in years"""
-        first_infections = self.sdo[self.sdo.infection_event == True].\
+    def __foi_cid_duration_from_first_visit__(self):
+        """find duration of each cid from first visit to last visit in years"""
+
+        first_visits = self.meta[self.meta.date >= self.burnin].\
             groupby('cohortid').\
             head(1)[['cohortid', 'date']].\
-            rename(columns = {'date' : 'first_infection'})
+            rename(columns = {'date' : 'first_visit'})
+
 
         last_visits = self.meta.\
             groupby('cohortid').\
             tail(1)[['cohortid', 'date']].\
             rename(columns = {'date' : 'last_visit'})
 
-        self.cid_dates = first_infections.\
+        self.cid_dates = first_visits.\
             merge(last_visits, how = 'left')
-        self.cid_dates['first_infection'] = pd.to_datetime(
-            self.cid_dates['first_infection'], format='%Y-%m-%d')
+        self.cid_dates['first_visit'] = pd.to_datetime(
+            self.cid_dates['first_visit'], format='%Y-%m-%d')
         self.cid_dates['last_visit'] = pd.to_datetime(
             self.cid_dates['last_visit'], format='%Y-%m-%d')
 
 
         self.cid_dates['duration'] = self.cid_dates.apply(
-            lambda x : (x.last_visit - x.first_infection).days / 365.25,
+            lambda x : (x.last_visit - x.first_visit).days / 365.25,
             axis = 1)
 
         return self.cid_dates
@@ -750,6 +751,9 @@ class SeekDeepUtils:
     def __foi_method_person__(self, individual=False):
         """calculate force of infection for each person"""
 
+        # apply burn in to dataframe
+        self.sdo = self.sdo[self.sdo.date >= self.burnin]
+
         # calculate infections with collapsed haplotype infection events
         if individual == True:
             self.__foi_collapse_infection_by_person__()
@@ -762,10 +766,10 @@ class SeekDeepUtils:
             reset_index()
 
         # merge cid dates with cid infections and fill single infections to 0
-        self.cid_dates = self.__foi_cid_duration_from_first_inf__()
+        self.cid_dates = self.__foi_cid_duration_from_first_visit__()
         cid_infections = cid_infections.\
             merge(self.cid_dates, how='left').\
-            drop(columns = ['first_infection', 'last_visit']).\
+            drop(columns = ['first_visit', 'last_visit']).\
             fillna(0)
 
         # calculate force of infection
@@ -875,14 +879,18 @@ class SeekDeepUtils:
         self.__label_new_infections__(allowedSkips)
 
         return self.skip_df
-    def Force_of_Infection(self, sdo, meta, controls=False, foi_method = 'all', allowedSkips = 3, default=15):
+    def Force_of_Infection(self, sdo, meta, controls=False, foi_method = 'all', allowedSkips = 3, default=15, burnin = '2018-01-01'):
         """calculate force of infection for a dataset"""
         self.__prepare_sdo__(sdo)
         self.__prepare_meta__(meta)
         self.__prepare_skips__()
         self.__label_new_infections__(allowedSkips)
         self.sdo = self.sdo.merge(self.skip_df, how='left')
+
         self.sdo.date = pd.to_datetime(self.sdo.date, format="%Y-%m-%d")
+        self.skip_df.date = pd.to_datetime(self.skip_df.date)
+        self.meta.date = pd.to_datetime(self.meta.date)
+        self.burnin = pd.to_datetime(burnin)
 
         if foi_method == 'all':
             return self.__foi_method_all__()
