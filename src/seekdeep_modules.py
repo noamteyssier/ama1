@@ -743,6 +743,9 @@ class SeekDeepUtils:
         relevant_columns = ['cohortid', 'date', 'h_popUID', 'infection_event']
         groupby_columns = ['ym']
 
+        # apply burnin to sdo
+        self.sdo = self.sdo[self.sdo.date >= self.burnin]
+
         # collapse all clones to a single infection event at a date
         if individual == True:
             self.__foi_collapse_infection_by_person__()
