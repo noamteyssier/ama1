@@ -29,7 +29,7 @@ def get_args():
     p.add_argument('-l', '--old_new_infections', action='store_true',
         help="Create a dataframe showing the start and end of infection of each cohortid~h_popUID")
     p.add_argument('-f', '--force_of_infection', type=str,
-        help="Calculate the Force of Infection of the Population [all, month, month_individual, cid, cid_individual]")
+        help="Calculate the Force of Infection of the Population [all, month, month_individual, month_agecat, month_individual_agecat, cid, cid_individual]")
     p.add_argument('-n', '--num_skips', default = 3, type=int,
         help="Number of allowed skips to allow during calculation of durations (default = 3 skips)")
     p.add_argument('-x', '--default_duration', default=15, type=int,
