@@ -668,22 +668,39 @@ class SeekDeepUtils:
         return self.new_infections
     def __add_agecat_to_sdo__(self):
         """add agecategories to seekdeep dataframe"""
-        age_categories = self.meta.\
+        self.age_categories = self.meta.\
             groupby('cohortid').\
             tail(1)[['cohortid', 'agecat']]
 
-        self.sdo = self.sdo.merge(age_categories, how='left')
-    def __foi_exposure__(self, meta):
+        self.sdo = self.sdo.merge(self.age_categories, how='left')
+    def __foi_exposure__(self, meta, agecat=False):
         """calculate exposure for a given sdo dataframe"""
-        scalar_exposure = meta['cohortid'].\
-            drop_duplicates().\
-            size
-        return scalar_exposure
-    def __foi_exposure_duration__(self, sdo):
+        if agecat:
+            exposure = self.age_categories.\
+                groupby('agecat').\
+                size().\
+                reset_index().\
+                rename(columns = {0 : 'exposure'})
+        else:
+            exposure = self.meta['cohortid'].drop_duplicates().size
+
+        return exposure
+    def __foi_exposure_duration__(self, sdo, agecat=False):
         """calculate duration in years for a given sdo dataframe"""
         sdo.date = pd.to_datetime(sdo.date, format = '%Y/%m/%d')
-        diff = sdo.date.max() - sdo.date.min()
-        return diff.days / 365.25
+        if agecat:
+            diff = sdo.\
+                groupby('agecat').\
+                date.\
+                apply(lambda x : x.max() - x.min()).\
+                reset_index().\
+                rename(columns = {'date' : 'duration'})
+            diff.duration = diff.\
+                apply(lambda x : x.duration.days / 365.25, axis = 1)
+        else:
+            diff = (sdo.date.max() - sdo.date.min()).days / 365.25
+
+        return diff
     def __foi_collapse_infection_by_person__(self):
         """collapse infections of a person_datetime to a single value"""
         personal_infection = self.sdo.\
@@ -722,22 +739,42 @@ class SeekDeepUtils:
             axis = 1)
 
         return self.cid_dates
-    def __foi_method_all__(self):
+    def __foi_method_all__(self, individual=False, agecat=False):
         """calculate force of infection over the entire dataset"""
 
-        new_infections = self.sdo.infection_event.sum()
-        duration = self.__foi_exposure_duration__(self.sdo)
-        exposure = self.__foi_exposure__(self.meta)
-        foi = new_infections / (duration * exposure)
+        # apply burnin to sdo
+        self.sdo = self.sdo[self.sdo.date >= self.burnin]
 
-        # return params as pandas dataframe
-        params = pd.DataFrame({
-            'infection_event' : [new_infections],
-            'duration' : [duration],
-            'exposure' : [exposure],
-            'force_of_infection' : [foi]})
+        if individual == True:
+            self.__foi_collapse_infection_by_person__()
 
-        return params
+        if agecat == True:
+            self.__add_agecat_to_sdo__()
+            duration = self.__foi_exposure_duration__(self.sdo, agecat)
+            exposure = self.__foi_exposure__(self.meta, agecat)
+            new_infections = self.sdo.\
+                groupby('agecat').\
+                infection_event.\
+                sum().\
+                reset_index()
+            foi = new_infections.\
+                merge(duration).\
+                merge(exposure)
+            foi['force_of_infection'] = foi.apply(
+                lambda x : x.infection_event / (x.duration * x.exposure),
+                axis = 1)
+        else:
+            new_infections = self.sdo.infection_event.sum()
+            duration = self.__foi_exposure_duration__(self.sdo, agecat)
+            exposure = self.__foi_exposure__(self.meta, agecat)
+            foi_scalar = new_infections / (duration * exposure)
+            foi = pd.DataFrame({
+                'infection_event' : [new_infections],
+                'duration' : [duration],
+                'exposure' : [exposure],
+                'force_of_infection' : [foi_scalar]})
+
+        return foi
     def __foi_method_month__(self, individual=False, agecat=False):
         """calculate force of infection by month and by clone"""
         relevant_columns = ['cohortid', 'date', 'h_popUID', 'infection_event']
@@ -922,6 +959,14 @@ class SeekDeepUtils:
 
         if foi_method == 'all':
             return self.__foi_method_all__()
+        elif foi_method == 'all_individual':
+            return self.__foi_method_all__(individual=True)
+        elif foi_method == 'all_individual_agecat':
+            return self.__foi_method_all__(individual=True, agecat=True)
+        elif foi_method == 'all_agecat':
+            return self.__foi_method_all__(agecat=True)
+
+
         elif foi_method == 'month':
             return self.__foi_method_month__()
         elif foi_method == 'month_individual':
