@@ -1,6 +1,8 @@
 # AMA1
 A collection of scripts used to analyze the sequencing data from PRISM2 ama1 hemi-nested pcr experiments.
 
+![](prism2/plots/haplodrop.png)
+
 ## haplotypeFilter
 A script to apply filters on seekdeep output to remove suspicious haplotypes on
 attributes defined by the user. Will return a dataframe in the same format as
