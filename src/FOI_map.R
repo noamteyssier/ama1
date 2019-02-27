@@ -81,13 +81,13 @@ maplo <- maplo %>%
   do(data.frame(flower(., 0.002)))
 
 
-
+# flowers
 g <- ggplot(data = ugMapDf, aes(x = long, y = lat)) +
   geom_polygon(colour = 'black', size = 0.5, fill = "white", aes(group = group)) +
   geom_point(data = maplo %>% filter(is.na(foi_sum)), size = 9, shape = 21, color = 'grey90',
     aes(x = lng, y = lat, group = NULL)) +
   geom_point(data = maplo,
-    alpha = 0.5, shape=21, size=2,
+    shape=21, size=2, alpha = 0.5,
     aes(x = lng2, y = lat2, group = NULL, fill=foi)) +
   geom_point(data = maplo, size = 0.5,
     aes(x = lng, y = lat, group = NULL)) +
@@ -95,3 +95,25 @@ g <- ggplot(data = ugMapDf, aes(x = long, y = lat)) +
   theme_graph() +
   theme(legend.position='bottom')
 ggsave("prism2/plots/maploFoi.png", g, width = 12, height = 12)
+
+
+
+# household mean foi
+maplo2 <- maplo %>%
+  mutate(foi = ifelse(is.na(foi), 0, foi))
+
+maplo2 <- maplo2 %>%
+  group_by(hhid) %>%
+  summarise(hfoi = mean(foi)) %>%
+  left_join(maplo2)
+
+g <- ggplot(data = ugMapDf, aes(x = long, y = lat)) +
+  geom_polygon(colour = 'black', size = 0.5, fill = "white", aes(group = group)) +
+  geom_point(data = maplo2,
+    shape=21, size=5,
+    aes(x = lng, y = lat, group = NULL, fill=hfoi)) +
+  theme_graph() +
+  theme(legend.position='bottom') +
+  scale_fill_gradientn(colors=c('pink', 'darkred'), limits = c(0.00001, 4))
+
+ggsave("prism2/plots/maploHFoi.pdf", g, width = 8, height = 8)
