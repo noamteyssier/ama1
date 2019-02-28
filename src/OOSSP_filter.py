@@ -25,7 +25,7 @@ def get_args():
     if len(sys.argv) == 1:
         p.print_help(sys.stderr)
         sys.exit(1)
-        
+
     if args.filter and args.plot_graph:
         sys.exit('Error : Please choose to filter OR to visualize')
 
@@ -44,7 +44,7 @@ def main():
 
     if args.plot_graph:
         h.PlotOOSSP(
-            vlines = [0.01, 0.02, 0.03],
+            vlines = [0.01, 0.02, 0.03, 0.05],
             hlines = [50, 100],
             color_type = args.plot_graph)
         return 1
