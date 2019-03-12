@@ -415,9 +415,9 @@ class SeekDeepUtils:
         # first infection occurs at a timepoint past the allowed skips
         elif row.skips > allowedSkips :
             return True
-        # first infection before the skip threshold but there is a gap between first visit and first infection
+        # first infection is before the skip threshold but there is a gap between the first visit and the first infection
         elif row.skips > 0 and row.visit_num <= allowedSkips:
-            return True
+            return False
         else:
             return False
     def __label_new_infections__(self, allowedSkips):
