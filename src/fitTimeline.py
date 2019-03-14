@@ -102,14 +102,15 @@ class Timeline:
     def __fitAQ__(self):
         theta = np.random.random(4)
         age_triplet_list = [(age, qpcr) for (age, qpcr) in self.age_qpcr_iter(3)]
-        self.fit_results = minimize(
-            self.__loglikelihood_AQ__,
-            theta, age_triplet_list,
-            method = 'Nelder-Mead'
-        )
+        self.__loglikelihood_AQ__(theta, age_triplet_list)
+        sys.exit()
+        # self.fit_results = minimize(
+        #     self.__loglikelihood_AQ__,
+        #     theta, age_triplet_list,
+        #     method = 'Nelder-Mead'
+        # )
         self.__print_fit_results__()
         return self.fit_results
-
     def __l1__(self, M, S):
         """ likelihood calculation for ++* """
         return np.prod(
@@ -157,6 +158,7 @@ class Timeline:
         """calculate log_likelihood for AQ triplet model with age + qpcr"""
         b0, b1, b2, b3 = theta
         vals = list()
+        sys.exit()
         for age, qpcr in age_triplet_list:
             M = expit(b0 + (b1 * age))
             S = expit(b2 + (b3 * qpcr[0]))
