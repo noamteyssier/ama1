@@ -2,8 +2,13 @@
 
 import pandas as pd
 import numpy as np
+import seaborn as sns
 import sys, re
 
+from scipy.optimize import minimize
+from scipy.special import expit
+
+sns.set(rc={'figure.figsize':(15, 12), 'lines.linewidth': 5})
 
 class TripletModel:
     def __init__(self, sdo, meta):
@@ -13,16 +18,9 @@ class TripletModel:
         self.sdo = pd.DataFrame()
         self.meta = pd.DataFrame()
 
-        self.ages = {
-            1 : [],
-            2 : [],
-            3 : [],
-            0 : []}
-        self.qpcrs = {
-            1 : [],
-            2 : [],
-            3 : [],
-            0 : []}
+        self.likelihood_types = {
+            'age' : [np.array([]), np.array([]), np.array([]), np.array([])],
+            'qpcr' : [np.array([]), np.array([]), np.array([]), np.array([])]}
 
         self.__load_sdo__()
         self.__load_meta__()
@@ -105,11 +103,13 @@ class TripletModel:
                 # for triplet
                 for t_idx in range(qpcr_mat[h_idx].shape[0]):
 
-                    # assign to likelihood class and append to dict
+                    # assign to likelihood class and append to type~class array
                     likelihood_type = self.__assign__(qpcr_mat[h_idx][t_idx])
-                    self.ages[likelihood_type].append(
+                    self.likelihood_types['age'][likelihood_type] = np.append(
+                        self.likelihood_types['age'][likelihood_type],
                         age_mat[h_idx][t_idx][0])
-                    self.qpcrs[likelihood_type].append(
+                    self.likelihood_types['qpcr'][likelihood_type] = np.append(
+                        self.likelihood_types['qpcr'][likelihood_type],
                         qpcr_mat[h_idx][t_idx][0])
     def __create_likelihood_type_arrays__(self):
         """
@@ -130,14 +130,63 @@ class TripletModel:
 
         # assign triplets to likelihood types and save qpcr and age of each first triplet
         qpcr_age.apply(lambda x : self.__assign_triplets__(x))
+    def __l1__(self, theta, idx=1):
+        m = expit(theta[0] + theta[1] * self.likelihood_types['age'][idx])
+        s = expit(theta[2] + theta[3] * self.likelihood_types['qpcr'][idx])
+        l1 = (1-m) * s
+        return np.log(l1[l1 > 0]).sum()
+    def __l2__(self, theta, idx=2):
+        m = expit(theta[0] + theta[1] * self.likelihood_types['age'][idx])
+        s = expit(theta[2] + theta[3] * np.log(self.likelihood_types['qpcr'][idx]))
+        l2 = s * (1 - s) * (1-m)**2
+        return np.log(l2[l2 > 0]).sum()
+    def __calculate_likelihood_aq__(self, theta):
+        l1 = self.__l1__(theta)
+        # l1 = np.log(l1[l1 > 0]).sum()
+
+        l2 = self.__l2__(theta)
+        # l2 = np.log(l2[l2 > 0]).sum()
+
+        l3 = 1 - self.__l2__(theta,3) - self.__l1__(theta, 3)
+
+        return -1 * np.array([l1, l2, l3]).sum()
 
 
+    def AQ(self):
+        theta = np.random.random(4)
+        m = minimize(
+            self.__calculate_likelihood_aq__,
+            theta,
+            method='Nelder-Mead')
+
+        return m.x
+        # self.__calculate_likelihood_aq__(theta)
 
 def main():
     sdo = "../prism2/full_prism2/filtered_5pc_10r.tab"
     meta = "../prism2/stata/allVisits.dta"
-    TripletModel(sdo, meta)
+    t = TripletModel(sdo, meta)
 
+    params = np.array([t.AQ() for _ in range(100)])
+
+    sns.kdeplot(params[:,0])#, hist_kws={'log' : True})
+    sns.kdeplot(params[:,1])#, hist_kws={'log' : True})
+    sns.kdeplot(params[:,2])#, hist_kws={'log' : True})
+    sns.kdeplot(params[:,3])#, hist_kws={'log' : True})
+
+    mean_params = [params[i].mean() for i in range(4)]
+    mean_params
+
+
+    age = pd.DataFrame({
+        'age' : np.linspace(1,70),
+        'val' : np.log(mean_params[0] + mean_params[1] * np.linspace(0,70))})
+    sns.scatterplot(data=age, x='age', y='val')
+
+    qpcr = pd.DataFrame({
+        'qpcr' : np.linspace(0.1,6),
+        'val' : np.log10(mean_params[2] + mean_params[3] * np.linspace(0.1,6))})
+    sns.scatterplot(data=qpcr, x='qpcr', y ='val')
 
 if __name__ == '__main__':
     main()
