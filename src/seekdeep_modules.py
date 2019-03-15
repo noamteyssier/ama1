@@ -272,7 +272,7 @@ class HaplotypeUtils:
 
             [plt.axvline(i, color = 'darkslategray', linestyle='dashed') for i in vlines]
             [plt.axhline(j, color = 'peru', linestyle='dashed') for j in hlines]
-            plt.show()
+            plt.savefig("../prism2/plots/oossp_fraction.pdf")
         elif color_type == 'occurence':
             self.__haplotype_occurence__()
             self.oossp['h2_occurence'] = self.oossp.apply(
@@ -288,7 +288,7 @@ class HaplotypeUtils:
 
             [plt.axvline(i, color = 'darkslategray', linestyle='dashed') for i in vlines]
             [plt.axhline(j, color = 'peru', linestyle='dashed') for j in hlines]
-            plt.show()
+            plt.savefig("../prism2/plots/oossp_occurence.pdf")
         elif color_type == 'density':
             self.__load_meta__()
             self.oossp = self.oossp.merge(self.meta[['s_Sample', 'qpcr']])
@@ -305,7 +305,7 @@ class HaplotypeUtils:
 
             [plt.axvline(i, color = 'darkslategray', linestyle='dashed') for i in vlines]
             [plt.axhline(j, color = 'peru', linestyle='dashed') for j in hlines]
-            plt.show()
+            plt.savefig("../prism2/plots/oossp_density.pdf")
     def FilterOOSSP(self, ratio = 50, pc = 0.01):
         """apply filter of maj/min pc ratio on one-off haplotypes in the same sample"""
         self.__oossp__()
@@ -415,9 +415,9 @@ class SeekDeepUtils:
         # first infection occurs at a timepoint past the allowed skips
         elif row.skips > allowedSkips :
             return True
-        # first infection before the skip threshold but there is a gap between first visit and first infection
+        # first infection is before the skip threshold but there is a gap between the first visit and the first infection
         elif row.skips > 0 and row.visit_num <= allowedSkips:
-            return True
+            return False
         else:
             return False
     def __label_new_infections__(self, allowedSkips):

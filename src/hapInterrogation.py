@@ -34,6 +34,8 @@ def get_args():
         help="Number of allowed skips to allow during calculation of durations (default = 3 skips)")
     p.add_argument('-x', '--default_duration', default=15, type=int,
         help="Default duration rate to use for single event infections (default = 15 days)")
+    p.add_argument('-b', '--burnin', default='2018-01-01', type=str,
+        help="Date to begin considering new infections (YYYY-MM-DD)")
 
     # if no args given print help
     if len(sys.argv) == 1:
@@ -77,7 +79,8 @@ def main():
         onl = s.Old_New_Infection_Labels(
             sdo, meta,
             allowedSkips = args.num_skips,
-            default=args.default_duration)
+            default=args.default_duration,
+            burnin=args.burnin)
         return print_out(onl)
 
     elif args.new_infections:
@@ -90,7 +93,8 @@ def main():
             sdo, meta,
             foi_method=args.force_of_infection,
             allowedSkips=args.num_skips,
-            default=args.default_duration)
+            default=args.default_duration,
+            burnin=args.burnin)
         return print_out(foi_params)
 
 
