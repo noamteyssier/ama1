@@ -7,6 +7,9 @@ import sys, re
 
 from scipy.optimize import minimize
 from scipy.special import expit
+from scipy.stats import gaussian_kde
+
+import matplotlib.pyplot as plt
 
 sns.set(rc={'figure.figsize':(15, 12), 'lines.linewidth': 5})
 
@@ -134,22 +137,22 @@ class TripletModel:
         m = expit(theta[0] + theta[1] * self.likelihood_types['age'][idx])
         s = expit(theta[2] + theta[3] * self.likelihood_types['qpcr'][idx])
         l1 = (1-m) * s
-        return np.log(l1[l1 > 0]).sum()
+        return l1.reshape(-1,1)
     def __l2__(self, theta, idx=2):
         m = expit(theta[0] + theta[1] * self.likelihood_types['age'][idx])
-        s = expit(theta[2] + theta[3] * np.log(self.likelihood_types['qpcr'][idx]))
+        s = expit(theta[2] + theta[3] * np.log10(self.likelihood_types['qpcr'][idx]))
         l2 = s * (1 - s) * (1-m)**2
-        return np.log(l2[l2 > 0]).sum()
+        return l2.reshape(-1,1)
     def __calculate_likelihood_aq__(self, theta):
+        """apply vectorized likelihood calculations"""
         l1 = self.__l1__(theta)
-        # l1 = np.log(l1[l1 > 0]).sum()
-
         l2 = self.__l2__(theta)
-        # l2 = np.log(l2[l2 > 0]).sum()
-
         l3 = 1 - self.__l2__(theta,3) - self.__l1__(theta, 3)
+        lik = np.concatenate([l1, l2, l3])
+        log_lik = np.log(lik)
 
-        return -1 * np.array([l1, l2, l3]).sum()
+        # return negative to minimize
+        return -1 * log_lik.sum()
 
 
     def AQ(self):
@@ -158,35 +161,54 @@ class TripletModel:
             self.__calculate_likelihood_aq__,
             theta,
             method='Nelder-Mead')
-
         return m.x
-        # self.__calculate_likelihood_aq__(theta)
-
+def maximize_density(vec, plot=False):
+    """estimate kernel, take argmax of pdf"""
+    g = gaussian_kde(vec)
+    x = np.linspace(-1, 1)
+    if plot:
+        sns.barplot(x = x, y = g.pdf(x), color='teal')
+    return x[np.argmax(g.pdf(x))]
+def plot_params(params):
+    """plot estimated parameters"""
+    sns.kdeplot(params[:,0], shade=True)
+    sns.kdeplot(params[:,1], shade=True)
+    sns.kdeplot(params[:,2], shade=True)
+    sns.kdeplot(params[:,3], shade=True)
+def plot_waning_rate_by_age(param_density_max):
+    """
+    show waning rate as a function of age
+    M = expit(b0 + (b1 * age))
+    """
+    x = np.linspace(0,50, 1000)
+    y = 1 / expit(param_density_max[0] + param_density_max[1] * x)
+    sns.lineplot(x=x, y=y)
+    plt.show()
+def plot_sensitivity_by_qpcr(param_density_max):
+    """
+    show sensitivity as a function of qpcr
+    S = expit(b2 + (b3 * age))
+    """
+    x = np.linspace(0.1, 6, 1000)
+    y = expit(param_density_max[2] + param_density_max[3] * x)
+    sns.lineplot(x=x, y=y)
+    plt.show()
 def main():
     sdo = "../prism2/full_prism2/filtered_5pc_10r.tab"
     meta = "../prism2/stata/allVisits.dta"
-    t = TripletModel(sdo, meta)
 
+
+    t = TripletModel(sdo, meta)
     params = np.array([t.AQ() for _ in range(100)])
 
-    sns.kdeplot(params[:,0])#, hist_kws={'log' : True})
-    sns.kdeplot(params[:,1])#, hist_kws={'log' : True})
-    sns.kdeplot(params[:,2])#, hist_kws={'log' : True})
-    sns.kdeplot(params[:,3])#, hist_kws={'log' : True})
-
-    mean_params = [params[i].mean() for i in range(4)]
-    mean_params
+    plot_params(params)
+    param_density_max = [maximize_density(params[:,i]) for i in range(4)]
 
 
-    age = pd.DataFrame({
-        'age' : np.linspace(1,70),
-        'val' : np.log(mean_params[0] + mean_params[1] * np.linspace(0,70))})
-    sns.scatterplot(data=age, x='age', y='val')
+    plot_waning_rate_by_age(param_density_max)
+    plot_sensitivity_by_qpcr(param_density_max)
 
-    qpcr = pd.DataFrame({
-        'qpcr' : np.linspace(0.1,6),
-        'val' : np.log10(mean_params[2] + mean_params[3] * np.linspace(0.1,6))})
-    sns.scatterplot(data=qpcr, x='qpcr', y ='val')
+
 
 if __name__ == '__main__':
     main()
