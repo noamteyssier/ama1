@@ -28,7 +28,6 @@ class SpatialClustering:
         self.__load_meta__()
         self.__merge_data__()
         self.__cHap_matrix__()
-        self.__household_index__()
     def __load_sdo__(self):
         """load in seekdeep output data"""
         self.sdo = pd.read_csv(self.sdo_fn, sep="\t")[['s_Sample', 'h_popUID', 'c_AveragedFrac']]
@@ -57,13 +56,8 @@ class SpatialClustering:
         self.cHap = self.data[['h_popUID', 'cohortid']].drop_duplicates()
         self.cHap['z'] = 1
         self.cHap = self.meta.merge(self.cHap, how='left')
-    def __household_index__(self):
-        """create cohortid-indexed series of household ids"""
-        self.hhIndex = self.meta[['cohortid', 'hhid']].\
-            drop_duplicates().\
-            set_index('cohortid').\
-            hhid
     def frequency_of_identity(self, x):
+        """Number of matching haplotypes in set divided by number of comparisons"""
         pv = x[['h_popUID', 'cohortid', 'z']].\
             pivot(
                 columns = 'h_popUID',
@@ -78,13 +72,28 @@ class SpatialClustering:
 
         return 0
 
-    def clusterHH(self):
+    def clusterHH(self, infOnly=False):
+        """
+        Pr(Zi == Zj | j in householdSet) /
+        Pr(Zi == Zj | j in populationSet)
 
+        =
+
+        sum(Zij) / sum(num_comparisons)
+        """
+
+        if infOnly :
+            self.cHap = self.cHap[self.cHap.z>0]
+
+        # numerator
         a = self.cHap.groupby('hhid').apply(lambda x : self.frequency_of_identity(x))
+
+        # denominator
         b = self.frequency_of_identity(self.cHap)
-        print(a.sum())
-        print(b)
-        print(a.sum() / b)
+
+        print(
+            "household similarity : {0}\npopulation similarity : {1}\nratio : {2}".\
+            format(a.sum(), b, a.sum()/b))
 
 
 
@@ -92,7 +101,7 @@ def main():
     sdo = '../prism2/full_prism2/filtered_5pc_10r.tab'
     meta = '../prism2/stata/allVisits.dta'
     sc = SpatialClustering(sdo, meta)
-    sc.clusterHH()
+    sc.clusterHH(True)
 
 
 
