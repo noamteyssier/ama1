@@ -58,28 +58,34 @@ class SpatialClustering:
         self.cHap = self.meta.merge(self.cHap, how='left')
     def frequency_of_identity(self, x):
         """Number of matching haplotypes in set divided by number of comparisons"""
-        pv = x[['h_popUID', 'cohortid', 'z']].\
-            pivot(
-                columns = 'h_popUID',
-                index='cohortid',
-                values='z'
-            ).fillna(0)
-        pv = pv.loc[:, pv.columns.notnull()]
-        if not pv.empty:
-            num = (pv.sum() - 1).sum()
-            dem = pv.size
-            return num/dem
+        if x.shape[0] > 1:
+            pv = x[['h_popUID', 'cohortid', 'z']].\
+                pivot(
+                    columns = 'h_popUID',
+                    index='cohortid',
+                    values='z'
+                ).fillna(0)
+
+            pv = pv.loc[:, pv.columns.notnull()]
+            if not pv.empty:
+
+                # sum of (n * (n-1)) / 2 for each haplotype
+                colsum = pv.sum(axis=0)
+                numerator = ((colsum * (colsum-1)) / 2).sum()
+
+                # sum of (C * (A -C)) for each cohortid
+                rowsum = pv.sum(axis=1)
+                matsum = np.where(pv > 0)[0].size
+                denominator = (rowsum * (matsum - rowsum)).sum()
+
+                return numerator / denominator
 
         return 0
 
-    def clusterHH(self, infOnly=False):
+    def clusterHH(self, infOnly=True):
         """
         Pr(Zi == Zj | j in householdSet) /
         Pr(Zi == Zj | j in populationSet)
-
-        =
-
-        sum(Zij) / sum(num_comparisons)
         """
 
         if infOnly :
@@ -93,15 +99,16 @@ class SpatialClustering:
 
         print(
             "household similarity : {0}\npopulation similarity : {1}\nratio : {2}".\
-            format(a.sum(), b, a.sum()/b))
+            format(a.mean(), b, a.mean()/b))
 
+        return (a, b, a.mean()/b)
 
 
 def main():
     sdo = '../prism2/full_prism2/filtered_5pc_10r.tab'
     meta = '../prism2/stata/allVisits.dta'
     sc = SpatialClustering(sdo, meta)
-    sc.clusterHH(True)
+    a, b, amb = sc.clusterHH()
 
 
 
