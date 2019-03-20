@@ -134,10 +134,10 @@ class SpatialClustering:
             p = pd.DataFrame({'similarity' : a, 'popNum' : s})
             params.append(p)
 
-        # sys.exit(a)
         return params
 
 def hhSize_vs_calculatedH(sdo, meta):
+    """calculatedH dependence on household size for nonpooled calculation"""
     sc = SpatialClustering(sdo, meta)
     p = [sc.clusterHH(shuffle_hhid=True, population=False, simdf=True)[1] for _ in range(50)]
     comparisons = np.concatenate([i.values for i in p])
@@ -146,8 +146,8 @@ def hhSize_vs_calculatedH(sdo, meta):
     plt.ylabel("HH size")
     plt.show()
     plt.close()
-
 def pooled_v_average(sdo, meta):
+    """distributions of pool/average and the respective calculation for the data"""
     sc = SpatialClustering(sdo, meta)
 
     # remove outlier
@@ -173,7 +173,6 @@ def pooled_v_average(sdo, meta):
     plt.axvline(ra/b, color='teal')
     plt.show()
     plt.close()
-
 def time_analysis(sdo, meta):
     """distribution of time spent in clusterHH"""
     sc = SpatialClustering(sdo, meta)
@@ -196,20 +195,18 @@ def time_analysis(sdo, meta):
     sns.distplot(np.array(t1))
     sns.distplot(np.array(t2))
     plt.show()
-
-
 def main():
     sdo = '../prism2/full_prism2/filtered_5pc_10r.tab'
     meta = '../prism2/stata/allVisits.dta'
 
 
-    time_analysis(sdo, meta)
+    # time_analysis(sdo, meta)
 
-    # # Show variance of calculated H by household size
-    # hhSize_vs_calculatedH(sdo, meta)
-    #
-    # # Show difference in pooling vs mean method for permutations with data
-    # pooled_v_average(sdo, meta)
+    # Show variance of calculated H by household size
+    hhSize_vs_calculatedH(sdo, meta)
+
+    # Show difference in pooling vs mean method for permutations with data
+    pooled_v_average(sdo, meta)
 
 
 
