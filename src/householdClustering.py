@@ -12,7 +12,7 @@ from numpy.random import shuffle
 import sys
 
 
-sns.set(rc={'figure.figsize':(15, 12), 'lines.linewidth': 5})
+sns.set(rc={'figure.figsize':(30, 24), 'lines.linewidth': 5})
 class SpatialClustering:
     def __init__(self, sdo, meta):
         self.sdo_fn = sdo
@@ -58,7 +58,12 @@ class SpatialClustering:
         """create a cohortid~haplotype matrix where 1 is haplotype found in cohortid at any point"""
         self.cHap = self.data[['h_popUID', 'cohortid']].drop_duplicates()
         self.cHap['z'] = 1
-        self.cHap = self.meta.merge(self.cHap, how='left')
+        self.cHap = self.meta.merge(self.cHap, how='right')
+    def __explore_hhid__(self):
+        print(self.cHap.hhid.value_counts())
+
+        sns.distplot(self.cHap.hhid.value_counts())
+        plt.show()
     def frequency_of_identity(self, x, rolling = False):
         """Number of matching haplotypes in set divided by number of comparisons"""
         if x.shape[0] > 1:
@@ -87,11 +92,12 @@ class SpatialClustering:
                 return numerator / denominator
 
         return 0
-    def clusterHH(self, infOnly=True, shuffle_hhid=False, population=True, rolling=False):
+    def clusterHH(self, infOnly=True, shuffle_hhid=False, population=True, rolling=False, simdf=False):
         """
         Pr(Zi == Zj | j in householdSet) /
         Pr(Zi == Zj | j in populationSet)
         """
+        params = []
 
         if infOnly :
             self.cHap = self.cHap[self.cHap.z>0]
@@ -102,6 +108,8 @@ class SpatialClustering:
 
         # numerator
         a = self.cHap.groupby('hhid').apply(lambda x : self.frequency_of_identity(x, rolling=rolling))
+        params.append(a)
+
 
         if rolling:
             nums = []
@@ -121,28 +129,41 @@ class SpatialClustering:
             print(
                 "household similarity : {0}\npopulation similarity : {1}\nratio : {2}".\
                 format(a.mean(), b, a.mean()/b))
-        else:
-            b = 1
+            params.append(b)
 
+        if simdf:
+            s = self.cHap.hhid.value_counts()
+            p = pd.DataFrame({'similarity' : a, 'popNum' : s})
+            params.append(p)
+            print(params)
+            sys.exit(p)
 
         # sys.exit(a)
-        return [a, b]
+        return params
 def main():
     sdo = '../prism2/full_prism2/filtered_5pc_10r.tab'
     meta = '../prism2/stata/allVisits.dta'
     sc = SpatialClustering(sdo, meta)
+    # sc.__explore_hhid__()
+
+    # sys.exit()
 
     # remove outlier
     sc.cHap = sc.cHap[sc.cHap.hhid != 131011801]
 
     # calculate mean with rolling *erators
-    a, b = sc.clusterHH(rolling=True)
-    a.mean()/b
+    params = sc.clusterHH(simdf=True, population=False)
+    a,b,c = params
+    p = [sc.clusterHH(shuffle_hhid=True, population=False, simdf=True)[1] for _ in range(500)]
+    comparisons = np.concatenate([i.values for i in p])
+    sns.scatterplot(x=comparisons[:,0], y=comparisons[:,1], alpha=0.5)
+    sys.exit(c)
+    a.mean()
 
-    #sns.distplot(a, bins=30, kde=False)
+    sns.distplot(a, bins=30, kde=False)
 
     # run permutations test
-    permutations = np.array([sc.clusterHH(population=False)[0]] + [sc.clusterHH(shuffle_hhid=True, population=False)[0] for _ in range(500)])
+    permutations = np.array([sc.clusterHH(population=False)[0]] + [sc.clusterHH(shuffle_hhid=True, population=False, rolling=False)[0] for _ in range(500)])
 
     # calculate upper and lower bounds of permutation means
     lower, higher = np.quantile(permutations[1:].mean(axis=1), [0.025, 1 - 0.025]) / b
@@ -150,7 +171,7 @@ def main():
     means[means > higher].size
 
     # plot distribution of permutations and observed calculation
-    sns.distplot(means/b, bins = 100)
+    sns.distplot(means/b, bins = 100, kde=True, hist=True)
     plt.axvline(a.mean()/b)
 
 
