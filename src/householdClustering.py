@@ -196,17 +196,18 @@ def time_analysis(sdo, meta):
     sns.distplot(np.array(t2))
     plt.show()
 def main():
-    sdo = '../prism2/full_prism2/filtered_5pc_10r.tab'
-    meta = '../prism2/stata/allVisits.dta'
+    fn_sdo = '../prism2/full_prism2/filtered_5pc_10r.tab'
+    fn_meta = '../prism2/stata/allVisits.dta'
+    fn_gps = '../prism2/stata/PRISM_GPS.csv'
 
-
-    # time_analysis(sdo, meta)
+    # Time comparisons
+    time_analysis(fn_sdo, fn_meta)
 
     # Show variance of calculated H by household size
-    hhSize_vs_calculatedH(sdo, meta)
+    hhSize_vs_calculatedH(fn_sdo, fn_meta)
 
     # Show difference in pooling vs mean method for permutations with data
-    pooled_v_average(sdo, meta)
+    pooled_v_average(fn_sdo, fn_meta)
 
 
 
