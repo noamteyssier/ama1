@@ -99,7 +99,7 @@ class SpatialClustering:
 
                 return numerator / denominator
 
-        return 0
+        return [0, 0] if rolling else 0
     def clusterHH(self, shuffle_hhid=False, population=True, rolling=False, simdf=False):
         """
         Pr(Zi == Zj | j in householdSet) /
@@ -114,16 +114,10 @@ class SpatialClustering:
         a = self.cHap.groupby('hhid').apply(lambda x : self.frequency_of_identity(x, rolling=rolling))
 
         if rolling:
-            nums = []
-            dems = []
-            for i in a:
-                if type(i) == list:
-                    nums.append(i[0])
-                    dems.append(i[1])
-
-            nums = np.array(nums)
-            dems = np.array(dems)
-            a = nums.sum() / dems.sum()
+            # flatten and reshape series of lists
+            a = np.array([st for row in a for st in row]).reshape(a.size,2)
+            num,dem = a.sum(axis=0)
+            a = num/dem
 
         params.append(a)
 
@@ -188,15 +182,15 @@ def time_analysis(sdo, meta):
     sc.cHap = sc.cHap[sc.cHap.hhid != 131011801]
 
     t1 = []
-    for i in range(20):
+    for i in range(200):
         t = timeit.default_timer()
-        sc.clusterHH(shuffle_hhid=True, population=False)
+        sc.clusterHH(shuffle_hhid=True, population=False, rolling=False)
         t1.append(timeit.default_timer() - t)
 
     t2 = []
-    for i in range(20):
+    for i in range(200):
         t = timeit.default_timer()
-        sc.clusterHH(shuffle_hhid=True, population=True)
+        sc.clusterHH(shuffle_hhid=True, population=False, rolling=True)
         t2.append(timeit.default_timer() - t)
 
     sns.distplot(np.array(t1))
@@ -209,14 +203,13 @@ def main():
     meta = '../prism2/stata/allVisits.dta'
 
 
-    # time_analysis(sdo, meta)
-    # sc.clusterHH(new_method=True)
+    time_analysis(sdo, meta)
 
-    # Show variance of calculated H by household size
-    hhSize_vs_calculatedH(sdo, meta)
-
-    # Show difference in pooling vs mean method for permutations with data
-    pooled_v_average(sdo, meta)
+    # # Show variance of calculated H by household size
+    # hhSize_vs_calculatedH(sdo, meta)
+    #
+    # # Show difference in pooling vs mean method for permutations with data
+    # pooled_v_average(sdo, meta)
 
 
 
