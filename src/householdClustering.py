@@ -9,7 +9,7 @@ from itertools import combinations
 from scipy.spatial.distance import squareform, pdist
 from numpy.random import shuffle
 
-import sys
+import sys, timeit
 
 
 sns.set(rc={'figure.figsize':(15, 12), 'lines.linewidth': 5})
@@ -31,6 +31,7 @@ class SpatialClustering:
         self.__load_meta__()
         self.__merge_data__()
         self.__cHap_matrix__()
+        self.__pivot_data__()
     def __load_sdo__(self):
         """load in seekdeep output data"""
         self.sdo = pd.read_csv(self.sdo_fn, sep="\t")[['s_Sample', 'h_popUID', 'c_AveragedFrac']]
@@ -59,18 +60,30 @@ class SpatialClustering:
         self.cHap = self.data[['h_popUID', 'cohortid']].drop_duplicates()
         self.cHap['z'] = 1
         self.cHap = self.meta.merge(self.cHap, how='right')
-    def frequency_of_identity(self, x, rolling = False):
+        self.cHap = self.cHap[self.cHap.z>0]
+    def __shuffle_households__(self):
+        """shuffle households based on cohortid-hhid pairs"""
+        h = self.cHap[['cohortid', 'hhid']].drop_duplicates()
+        shuffle(h.hhid.values)
+        self.cHap = self.cHap.drop(columns = 'hhid').merge(h)
+    def __pivot_data__(self):
+        """pivot population data"""
+        self.pv = self.cHap[['h_popUID', 'cohortid', 'z']].\
+            pivot(
+                columns = 'h_popUID',
+                index='cohortid',
+                values='z'
+            ).fillna(0)
+    def frequency_of_identity(self, x, rolling=False):
         """Number of matching haplotypes in set divided by number of comparisons"""
         if x.shape[0] > 1:
-            pv = x[['h_popUID', 'cohortid', 'z']].\
-                pivot(
-                    columns = 'h_popUID',
-                    index='cohortid',
-                    values='z'
-                ).fillna(0)
 
-            pv = pv.loc[:, pv.columns.notnull()]
-            if not pv.empty and pv.shape[0] > 1:
+            # subset population matrix
+            cids = x.cohortid.unique()
+            hids = x.h_popUID.unique()
+            pv = self.pv.loc[cids][hids].values
+
+            if pv.shape[0] > 1:
 
                 # sum of (n * (n-1)) / 2 for each haplotype
                 colsum = pv.sum(axis=0)
@@ -87,24 +100,18 @@ class SpatialClustering:
                 return numerator / denominator
 
         return 0
-    def clusterHH(self, infOnly=True, shuffle_hhid=False, population=True, rolling=False, simdf=False):
+    def clusterHH(self, shuffle_hhid=False, population=True, rolling=False, simdf=False):
         """
         Pr(Zi == Zj | j in householdSet) /
         Pr(Zi == Zj | j in populationSet)
         """
         params = []
 
-        if infOnly :
-            self.cHap = self.cHap[self.cHap.z>0]
-
         if shuffle_hhid :
-            shuffle(self.cHap.hhid.values)
-
+            self.__shuffle_households__()
 
         # numerator
         a = self.cHap.groupby('hhid').apply(lambda x : self.frequency_of_identity(x, rolling=rolling))
-        params.append(a)
-
 
         if rolling:
             nums = []
@@ -118,6 +125,8 @@ class SpatialClustering:
             dems = np.array(dems)
             a = nums.sum() / dems.sum()
 
+        params.append(a)
+
         # denominator
         if population:
             b = self.frequency_of_identity(self.cHap)
@@ -127,7 +136,7 @@ class SpatialClustering:
             params.append(b)
 
         if simdf:
-            s = self.cHap.hhid.value_counts()
+            s = self.cHap[['cohortid', 'hhid']].drop_duplicates().hhid.value_counts()
             p = pd.DataFrame({'similarity' : a, 'popNum' : s})
             params.append(p)
 
@@ -136,7 +145,7 @@ class SpatialClustering:
 
 def hhSize_vs_calculatedH(sdo, meta):
     sc = SpatialClustering(sdo, meta)
-    p = [sc.clusterHH(shuffle_hhid=True, population=False, simdf=True)[1] for _ in range(500)]
+    p = [sc.clusterHH(shuffle_hhid=True, population=False, simdf=True)[1] for _ in range(50)]
     comparisons = np.concatenate([i.values for i in p])
     sns.scatterplot(x=comparisons[:,0], y=comparisons[:,1], alpha=0.2, s=100)
     plt.xlabel("Calculated H")
@@ -144,33 +153,70 @@ def hhSize_vs_calculatedH(sdo, meta):
     plt.show()
     plt.close()
 
-def main():
-    sdo = '../prism2/full_prism2/filtered_5pc_10r.tab'
-    meta = '../prism2/stata/allVisits.dta'
+def pooled_v_average(sdo, meta):
     sc = SpatialClustering(sdo, meta)
-
-    # # Show variance of calculated H by household size
-    # hhSize_vs_calculatedH(sdo, meta)
 
     # remove outlier
     sc.cHap = sc.cHap[sc.cHap.hhid != 131011801]
 
     # calculate mean with rolling *erators
-    a,b = sc.clusterHH()
-
-    sns.distplot(a, bins=30, kde=False)
+    a,b = sc.clusterHH(rolling=False)
+    ra,b = sc.clusterHH(rolling=True)
 
     # run permutations test
     permutations = np.array([sc.clusterHH(shuffle_hhid=True, population=False, rolling=True)[0] for _ in range(500)])
+    o_permutations = np.array([sc.clusterHH(shuffle_hhid=True, population=False)[0] for _ in range(500)])
 
-    # calculate upper and lower bounds of permutation means
-    lower, higher = np.quantile(permutations.mean(axis=1), [0.025, 1 - 0.025]) / b
-    means = permutations.mean(axis=1)
-    means[means > higher].size
+    # confidence intervals on pooled method
+    lower, higher = np.quantile(permutations, [0.025, 1 - 0.025]) / b
+    print("CI : {0} - {1}".format(lower, higher))
+    print("calculated H : {0}".format(ra/b))
 
-    # plot distribution of permutations and observed calculation
-    sns.distplot(means/b, bins = 100, kde=True, hist=True)
-    plt.axvline(a.mean()/b)
+    # plotting
+    sns.distplot(permutations/b, color='teal')
+    sns.distplot(o_permutations.mean(axis=1)/b, color='orange')
+    plt.axvline(a.mean()/b, color='orange')
+    plt.axvline(ra/b, color='teal')
+    plt.show()
+    plt.close()
+
+def time_analysis(sdo, meta):
+    """distribution of time spent in clusterHH"""
+    sc = SpatialClustering(sdo, meta)
+
+    # remove outlier
+    sc.cHap = sc.cHap[sc.cHap.hhid != 131011801]
+
+    t1 = []
+    for i in range(20):
+        t = timeit.default_timer()
+        sc.clusterHH(shuffle_hhid=True, population=False)
+        t1.append(timeit.default_timer() - t)
+
+    t2 = []
+    for i in range(20):
+        t = timeit.default_timer()
+        sc.clusterHH(shuffle_hhid=True, population=True)
+        t2.append(timeit.default_timer() - t)
+
+    sns.distplot(np.array(t1))
+    sns.distplot(np.array(t2))
+    plt.show()
+
+
+def main():
+    sdo = '../prism2/full_prism2/filtered_5pc_10r.tab'
+    meta = '../prism2/stata/allVisits.dta'
+
+
+    # time_analysis(sdo, meta)
+    # sc.clusterHH(new_method=True)
+
+    # Show variance of calculated H by household size
+    hhSize_vs_calculatedH(sdo, meta)
+
+    # Show difference in pooling vs mean method for permutations with data
+    pooled_v_average(sdo, meta)
 
 
 
