@@ -12,7 +12,7 @@ from numpy.random import shuffle
 import sys
 
 
-sns.set(rc={'figure.figsize':(30, 24), 'lines.linewidth': 5})
+sns.set(rc={'figure.figsize':(15, 12), 'lines.linewidth': 5})
 class SpatialClustering:
     def __init__(self, sdo, meta):
         self.sdo_fn = sdo
@@ -59,11 +59,6 @@ class SpatialClustering:
         self.cHap = self.data[['h_popUID', 'cohortid']].drop_duplicates()
         self.cHap['z'] = 1
         self.cHap = self.meta.merge(self.cHap, how='right')
-    def __explore_hhid__(self):
-        print(self.cHap.hhid.value_counts())
-
-        sns.distplot(self.cHap.hhid.value_counts())
-        plt.show()
     def frequency_of_identity(self, x, rolling = False):
         """Number of matching haplotypes in set divided by number of comparisons"""
         if x.shape[0] > 1:
@@ -135,39 +130,42 @@ class SpatialClustering:
             s = self.cHap.hhid.value_counts()
             p = pd.DataFrame({'similarity' : a, 'popNum' : s})
             params.append(p)
-            print(params)
-            sys.exit(p)
 
         # sys.exit(a)
         return params
+
+def hhSize_vs_calculatedH(sdo, meta):
+    sc = SpatialClustering(sdo, meta)
+    p = [sc.clusterHH(shuffle_hhid=True, population=False, simdf=True)[1] for _ in range(500)]
+    comparisons = np.concatenate([i.values for i in p])
+    sns.scatterplot(x=comparisons[:,0], y=comparisons[:,1], alpha=0.2, s=100)
+    plt.xlabel("Calculated H")
+    plt.ylabel("HH size")
+    plt.show()
+    plt.close()
+
 def main():
     sdo = '../prism2/full_prism2/filtered_5pc_10r.tab'
     meta = '../prism2/stata/allVisits.dta'
     sc = SpatialClustering(sdo, meta)
-    # sc.__explore_hhid__()
 
-    # sys.exit()
+    # # Show variance of calculated H by household size
+    # hhSize_vs_calculatedH(sdo, meta)
 
     # remove outlier
     sc.cHap = sc.cHap[sc.cHap.hhid != 131011801]
 
     # calculate mean with rolling *erators
-    params = sc.clusterHH(simdf=True, population=False)
-    a,b,c = params
-    p = [sc.clusterHH(shuffle_hhid=True, population=False, simdf=True)[1] for _ in range(500)]
-    comparisons = np.concatenate([i.values for i in p])
-    sns.scatterplot(x=comparisons[:,0], y=comparisons[:,1], alpha=0.5)
-    sys.exit(c)
-    a.mean()
+    a,b = sc.clusterHH()
 
     sns.distplot(a, bins=30, kde=False)
 
     # run permutations test
-    permutations = np.array([sc.clusterHH(population=False)[0]] + [sc.clusterHH(shuffle_hhid=True, population=False, rolling=False)[0] for _ in range(500)])
+    permutations = np.array([sc.clusterHH(shuffle_hhid=True, population=False, rolling=True)[0] for _ in range(500)])
 
     # calculate upper and lower bounds of permutation means
-    lower, higher = np.quantile(permutations[1:].mean(axis=1), [0.025, 1 - 0.025]) / b
-    means = permutations[1:].mean(axis=1)
+    lower, higher = np.quantile(permutations.mean(axis=1), [0.025, 1 - 0.025]) / b
+    means = permutations.mean(axis=1)
     means[means > higher].size
 
     # plot distribution of permutations and observed calculation
