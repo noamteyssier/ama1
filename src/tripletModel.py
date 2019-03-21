@@ -26,7 +26,7 @@ class TripletModel:
             'qpcr' : [np.array([]), np.array([]), np.array([]), np.array([])]}
 
         # bool to avoid doubling work
-        likelihoods_created = False
+        self.likelihoods_created = False
 
         self.__load_sdo__()
         self.__load_meta__()
@@ -61,7 +61,7 @@ class TripletModel:
         self.meta.date = pd.to_datetime(self.meta.date, format='%Y-%m-%d')
     def __merge_data__(self):
         """merge meta and seekdeep output"""
-        merged_meta_sdo = self.meta.merge(
+        self.merged_meta_sdo = self.meta.merge(
             self.sdo,
             how='left',
             left_on=['cohortid', 'date'],
@@ -132,15 +132,17 @@ class TripletModel:
         - grow lists of each class type for age and qpcr
             - take first of each triplet for age/qpcr
         """
-        if not likelihoods_created:
+        if not self.likelihoods_created:
             # series {cohortid : [qpcr_triplet_matrix, age_triplet_matrix]}
-            qpcr_age = merged_meta_sdo.groupby('cohortid').apply(lambda x : self.__triplet_iter__(x))
+            qpcr_age = self.merged_meta_sdo.\
+                groupby('cohortid').\
+                apply(lambda x : self.__triplet_iter__(x))
 
             # assign triplets to likelihood types and save qpcr and age of each first triplet
             qpcr_age.apply(lambda x : self.__assign_triplets__(x))
 
             # flip switch
-            likelihoods_created = True
+            self.likelihoods_created = True
     def __l1__(self, theta, idx=1):
         m = expit(theta[0] + theta[1] * self.likelihood_types['age'][idx])
         s = expit(theta[2] + theta[3] * self.likelihood_types['qpcr'][idx])
@@ -204,9 +206,6 @@ def main():
     sdo = "../prism2/full_prism2/filtered_5pc_10r.tab"
     meta = "../prism2/stata/allVisits.dta"
 
-    s = pd.read_csv(sdo, sep="\t")
-    m = pd.read_stata(meta)
-    sys.exit(m)
 
     t = TripletModel(sdo, meta)
     params = np.array([t.AQ() for _ in range(100)])
