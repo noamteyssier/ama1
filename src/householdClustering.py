@@ -3,6 +3,7 @@
 import numpy as np
 import pandas as pd
 import seaborn as sns
+import networkx as nx
 import matplotlib.pyplot as plt
 
 from itertools import combinations
@@ -163,6 +164,22 @@ class SpatialClustering:
         a = (self.square_gps_dist <= d) & (self.square_gps_dist > 0)
         b = a.sum(axis=0)
         return b
+    def iHH_plot(self, stepDist=False, heatMap=False, boxPlot=False):
+        if stepDist:
+            sns.distplot(self.gps_dist, kde=False, bins=30)
+            plt.xlabel("household distances (km)")
+            plt.ylabel("number of pairs")
+        elif heatMap:
+            sns.heatmap(1 - self.square_gps_dist)
+        elif boxPlot:
+            lin = np.arange(15) # x axis (distance threshold)
+            counts = np.array([self.iHH_counts(i) for i in lin])
+            counts = pd.DataFrame(counts)
+            counts['lin'] = lin
+            melted_counts = pd.melt(a, id_vars='lin', var_name='hh', value_name='comparisons')
+            sns.boxplot(x='lin', y='comparisons', data=melted_counts)
+        plt.show()
+
 
 def hhSize_vs_calculatedH(sdo, meta):
     """calculatedH dependence on household size for nonpooled calculation"""
@@ -224,54 +241,31 @@ def time_analysis(sdo, meta):
     sns.distplot(np.array(t2))
     plt.show()
 
-def intraHH_clusters(sdo, meta, gps):
-    sc = SpatialClustering(sdo, meta, gps)
-    lin = np.arange(15)
-
-    # calculate size of clusters
-    a = np.array([sc.iHH_counts(i) for i in lin])
-    a = pd.DataFrame(a)
-    a['lin'] = lin
-
-    # melt for plotting
-    b = pd.melt(a, id_vars='lin', var_name='hh', value_name='comparisons')
-
-    sns.boxplot(x='lin', y='comparisons', data=b)
-    plt.show()
-
-    # [sns.distplot(j) for j in a]
-    # plt.show()
-    # sns.heatmap(sc.square_gps_dist)
-    # plt.show()
-    # plt.close()
-    #
-    # sns.distplot(sc.gps_dist)
-    # plt.show()
-
-    # sp = squareform(p)
-    # sp = pd.DataFrame(np.tril(sp))
-    # sp
 
 
 def main():
     fn_sdo = '../prism2/full_prism2/filtered_5pc_10r.tab'
     fn_meta = '../prism2/stata/allVisits.dta'
     fn_gps = '../prism2/stata/PRISM_GPS.csv'
+    sc = SpatialClustering(fn_sdo, fn_meta, fn_gps)
 
-    intraHH_clusters(fn_sdo, fn_meta, fn_gps)
+    sc.iHH_plot(stepDist=True)
+    a = sc.square_gps_dist.copy()
+    a[a>2] = 0
+    G = nx.from_numpy_matrix(a)
+    nx.draw(G)
+    print(a[:,0])
 
+    sys.exit()
 
-    #
-    # sys.exit()
-    #
-    # # Time comparisons
-    # time_analysis(fn_sdo, fn_meta)
-    #
-    # # Show variance of calculated H by household size
-    # hhSize_vs_calculatedH(fn_sdo, fn_meta)
-    #
-    # # Show difference in pooling vs mean method for permutations with data
-    # pooled_v_average(fn_sdo, fn_meta)
+    # Time comparisons
+    time_analysis(fn_sdo, fn_meta)
+
+    # Show variance of calculated H by household size
+    hhSize_vs_calculatedH(fn_sdo, fn_meta)
+
+    # Show difference in pooling vs mean method for permutations with data
+    pooled_v_average(fn_sdo, fn_meta)
 
 
 
