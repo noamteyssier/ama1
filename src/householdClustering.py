@@ -8,30 +8,41 @@ import matplotlib.pyplot as plt
 from itertools import combinations
 from scipy.spatial.distance import squareform, pdist
 from numpy.random import shuffle
+from geopy.distance import distance
 
 import sys, timeit
 
 
 sns.set(rc={'figure.figsize':(15, 12), 'lines.linewidth': 5})
 class SpatialClustering:
-    def __init__(self, sdo, meta):
+    def __init__(self, sdo, meta, gps=False):
         self.sdo_fn = sdo
         self.meta_fn = meta
+        self.gps_fn = gps
 
         self.sdo = pd.DataFrame()
         self.meta = pd.DataFrame()
         self.data = pd.DataFrame()
+        self.gps = pd.DataFrame()
 
         self.cHap = pd.DataFrame()
         self.cHapMat = pd.DataFrame()
         self.hhIndex = pd.Series()
         self.pw_dist = pd.DataFrame()
+        self.gps_dist = pd.DataFrame()
+        self.square_gps_dist = pd.DataFrame()
 
         self.__load_sdo__()
         self.__load_meta__()
         self.__merge_data__()
         self.__cHap_matrix__()
         self.__pivot_data__()
+
+        if self.gps_fn:
+            self.__load_gps__()
+            self.__gps_pwdist__()
+
+
     def __load_sdo__(self):
         """load in seekdeep output data"""
         self.sdo = pd.read_csv(self.sdo_fn, sep="\t")[['s_Sample', 'h_popUID', 'c_AveragedFrac']]
@@ -51,6 +62,15 @@ class SpatialClustering:
     def __load_meta__(self):
         """load in cohort meta data"""
         self.meta = pd.read_stata(self.meta_fn)[['cohortid', 'hhid']].drop_duplicates()
+    def __load_gps__(self):
+        """load gps as dataframe"""
+        self.gps = pd.read_csv(self.gps_fn, sep="\t")
+        self.gps = self.gps[self.gps.hhid.isin(self.data.hhid.unique())]
+        self.gps['coord'] = self.gps[['lat', 'lng']].apply(tuple, axis=1)
+    def __gps_pwdist__(self):
+        """pairwise distances of coordinates found in data as squareform and array"""
+        self.gps_dist = pdist(self.gps, lambda x,y : distance(x[-1], y[-1]).km)
+        self.square_gps_dist = np.tril(squareform(self.gps_dist))
     def __merge_data__(self):
         """merge cohort meta data with seekdeep output"""
         self.data = self.sdo.merge(
@@ -135,6 +155,14 @@ class SpatialClustering:
             params.append(p)
 
         return params
+    def iHH_counts(self, d):
+        """
+        given a distance in km (d) return number of comparisons
+        that fall within distance for each hh
+        """
+        a = (self.square_gps_dist <= d) & (self.square_gps_dist > 0)
+        b = a.sum(axis=0)
+        return b
 
 def hhSize_vs_calculatedH(sdo, meta):
     """calculatedH dependence on household size for nonpooled calculation"""
@@ -195,19 +223,55 @@ def time_analysis(sdo, meta):
     sns.distplot(np.array(t1))
     sns.distplot(np.array(t2))
     plt.show()
+
+def intraHH_clusters(sdo, meta, gps):
+    sc = SpatialClustering(sdo, meta, gps)
+    lin = np.arange(15)
+
+    # calculate size of clusters
+    a = np.array([sc.iHH_counts(i) for i in lin])
+    a = pd.DataFrame(a)
+    a['lin'] = lin
+
+    # melt for plotting
+    b = pd.melt(a, id_vars='lin', var_name='hh', value_name='comparisons')
+
+    sns.boxplot(x='lin', y='comparisons', data=b)
+    plt.show()
+
+    # [sns.distplot(j) for j in a]
+    # plt.show()
+    # sns.heatmap(sc.square_gps_dist)
+    # plt.show()
+    # plt.close()
+    #
+    # sns.distplot(sc.gps_dist)
+    # plt.show()
+
+    # sp = squareform(p)
+    # sp = pd.DataFrame(np.tril(sp))
+    # sp
+
+
 def main():
     fn_sdo = '../prism2/full_prism2/filtered_5pc_10r.tab'
     fn_meta = '../prism2/stata/allVisits.dta'
     fn_gps = '../prism2/stata/PRISM_GPS.csv'
 
-    # Time comparisons
-    time_analysis(fn_sdo, fn_meta)
+    intraHH_clusters(fn_sdo, fn_meta, fn_gps)
 
-    # Show variance of calculated H by household size
-    hhSize_vs_calculatedH(fn_sdo, fn_meta)
 
-    # Show difference in pooling vs mean method for permutations with data
-    pooled_v_average(fn_sdo, fn_meta)
+    #
+    # sys.exit()
+    #
+    # # Time comparisons
+    # time_analysis(fn_sdo, fn_meta)
+    #
+    # # Show variance of calculated H by household size
+    # hhSize_vs_calculatedH(fn_sdo, fn_meta)
+    #
+    # # Show difference in pooling vs mean method for permutations with data
+    # pooled_v_average(fn_sdo, fn_meta)
 
 
 
