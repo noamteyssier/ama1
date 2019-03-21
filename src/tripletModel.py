@@ -49,7 +49,7 @@ class TripletModel:
         self.sdo = self.sdo.drop(columns = 's_Sample')
     def __load_meta__(self):
         """load in cohort meta data"""
-        self.meta = pd.read_stata(self.meta_fn)[['cohortid', 'date', 'ageyrs', 'qpcr', 'visittype', 'malariacat']]
+        self.meta = pd.read_stata(self.meta_fn)[['cohortid', 'date', 'ageyrs', 'qpcr', 'visittype', 'malariacat', 'agecat']]
 
         # cid filter
         self.meta = self.meta[self.meta.cohortid.isin(self.sdo.cohortid)]
@@ -163,14 +163,19 @@ class TripletModel:
 
         # return negative to minimize
         return -1 * log_lik.sum()
-    def AQ(self):
+    def AQ(self, method='Nelder-Mead'):
         self.__create_likelihood_type_arrays__()
         theta = np.random.random(4)
-        m = minimize(
+        self.min = minimize(
             self.__calculate_likelihood_aq__,
             theta,
-            method='Nelder-Mead')
-        return m.x
+            method=method)
+        return self.min.x
+    def set_agecat(self, given_agecat):
+        """set age category for dataset"""
+        self.agecat_label = given_agecat
+        self.merged_meta_sdo = self.merged_meta_sdo[
+            self.merged_meta_sdo.agecat == given_agecat]
 def maximize_density(vec, plot=False):
     """estimate kernel, take argmax of pdf"""
     g = gaussian_kde(vec)
@@ -184,31 +189,56 @@ def plot_params(params):
     sns.kdeplot(params[:,1], shade=True)
     sns.kdeplot(params[:,2], shade=True)
     sns.kdeplot(params[:,3], shade=True)
-def plot_waning_rate_by_age(param_density_max):
+def plot_waning_rate_by_age(param_density_max, label=None, show=True):
     """
     show waning rate as a function of age
     M = expit(b0 + (b1 * age))
     """
     x = np.linspace(0,50, 1000)
     y = 1 / expit(param_density_max[0] + param_density_max[1] * x)
-    sns.lineplot(x=x, y=y)
-    plt.show()
-def plot_sensitivity_by_qpcr(param_density_max):
+    sns.lineplot(x=x, y=y, label=label)
+    if show:
+        plt.show()
+def plot_sensitivity_by_qpcr(param_density_max, label=None, show=True):
     """
     show sensitivity as a function of qpcr
     S = expit(b2 + (b3 * age))
     """
     x = np.linspace(0.1, 6, 1000)
     y = expit(param_density_max[2] + param_density_max[3] * x)
-    sns.lineplot(x=x, y=y)
+
+    sns.lineplot(x=x, y=1-y, label=label)
+    if show:
+        plt.show()
+def triplet_by_age(sdo, meta):
+    five_minus = TripletModel(sdo, meta)
+    five_to_fifteen = TripletModel(sdo, meta)
+    fifteen_plus = TripletModel(sdo, meta)
+
+    five_minus.set_agecat('< 5 years')
+    five_to_fifteen.set_agecat('5-15 years')
+    fifteen_plus.set_agecat('16 years or older')
+
+    for i in [five_minus, five_to_fifteen, fifteen_plus]:
+        params = np.array([i.AQ() for _ in range(100)])
+        param_density_max = [maximize_density(params[:,i]) for i in range(4)]
+        plot_sensitivity_by_qpcr(param_density_max, label = i.agecat_label, show=False)
+
+    plt.xlabel('QPCR (log10)')
+    plt.ylabel("Probability of Miss (triplet_model)")
     plt.show()
+
+    sys.exit()
+
 def main():
     sdo = "../prism2/full_prism2/filtered_5pc_10r.tab"
     meta = "../prism2/stata/allVisits.dta"
 
 
-    t = TripletModel(sdo, meta)
-    params = np.array([t.AQ() for _ in range(100)])
+
+
+    # plot triplet sensitivity estimation by age as afunction of qpcr
+    triplet_by_age(sdo, meta)
 
     plot_params(params)
     param_density_max = [maximize_density(params[:,i]) for i in range(4)]
