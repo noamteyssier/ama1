@@ -25,9 +25,12 @@ class TripletModel:
             'age' : [np.array([]), np.array([]), np.array([]), np.array([])],
             'qpcr' : [np.array([]), np.array([]), np.array([]), np.array([])]}
 
+        # bool to avoid doubling work
+        likelihoods_created = False
+
         self.__load_sdo__()
         self.__load_meta__()
-        self.__create_likelihood_type_arrays__()
+        self.__merge_data__()
     def __load_sdo__(self):
         """load in seekdeep output data"""
         self.sdo = pd.read_csv(self.sdo_fn, sep="\t")[['s_Sample', 'h_popUID', 'c_AveragedFrac']]
@@ -56,6 +59,13 @@ class TripletModel:
 
         # convert to datetime
         self.meta.date = pd.to_datetime(self.meta.date, format='%Y-%m-%d')
+    def __merge_data__(self):
+        """merge meta and seekdeep output"""
+        merged_meta_sdo = self.meta.merge(
+            self.sdo,
+            how='left',
+            left_on=['cohortid', 'date'],
+            right_on=['cohortid', 'date'])
     def __window_stack__(self, arr):
         """stack sliding windows as a matrix"""
         return np.array([arr[i:i+3] for i in range(arr.size-2)])
@@ -122,17 +132,15 @@ class TripletModel:
         - grow lists of each class type for age and qpcr
             - take first of each triplet for age/qpcr
         """
-        merged_meta_sdo = self.meta.merge(
-            self.sdo,
-            how='left',
-            left_on=['cohortid', 'date'],
-            right_on=['cohortid', 'date'])
+        if not likelihoods_created:
+            # series {cohortid : [qpcr_triplet_matrix, age_triplet_matrix]}
+            qpcr_age = merged_meta_sdo.groupby('cohortid').apply(lambda x : self.__triplet_iter__(x))
 
-        # series {cohortid : [qpcr_triplet_matrix, age_triplet_matrix]}
-        qpcr_age = merged_meta_sdo.groupby('cohortid').apply(lambda x : self.__triplet_iter__(x))
+            # assign triplets to likelihood types and save qpcr and age of each first triplet
+            qpcr_age.apply(lambda x : self.__assign_triplets__(x))
 
-        # assign triplets to likelihood types and save qpcr and age of each first triplet
-        qpcr_age.apply(lambda x : self.__assign_triplets__(x))
+            # flip switch
+            likelihoods_created = True
     def __l1__(self, theta, idx=1):
         m = expit(theta[0] + theta[1] * self.likelihood_types['age'][idx])
         s = expit(theta[2] + theta[3] * self.likelihood_types['qpcr'][idx])
@@ -153,9 +161,8 @@ class TripletModel:
 
         # return negative to minimize
         return -1 * log_lik.sum()
-
-
     def AQ(self):
+        self.__create_likelihood_type_arrays__()
         theta = np.random.random(4)
         m = minimize(
             self.__calculate_likelihood_aq__,
@@ -197,6 +204,9 @@ def main():
     sdo = "../prism2/full_prism2/filtered_5pc_10r.tab"
     meta = "../prism2/stata/allVisits.dta"
 
+    s = pd.read_csv(sdo, sep="\t")
+    m = pd.read_stata(meta)
+    sys.exit(m)
 
     t = TripletModel(sdo, meta)
     params = np.array([t.AQ() for _ in range(100)])
