@@ -410,7 +410,11 @@ class SeekDeepUtils:
 
             # replace all values with qpcr date values
             for i in range(wide_cid.shape[1]):
-                wide_cid.iloc[:,i] = qpcr_vals
+                try:
+                    first_inf = np.where(wide_cid.iloc[:,i] > 0)[0][0]
+                    wide_cid.iloc[:,i][first_inf:] = qpcr_vals[first_inf:]
+                except IndexError:
+                    pass
 
             # transpose
             wide_cid = wide_cid.T
