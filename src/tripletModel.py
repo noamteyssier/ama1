@@ -152,9 +152,13 @@ class TripletModel:
         """
         if not self.likelihoods_created:
             # series {cohortid : [qpcr_triplet_matrix, age_triplet_matrix]}
+
+            ## Apply bootstrapping on this variable instead of on the MMS df
             qpcr_age = self.merged_meta_sdo.\
                 groupby('cohortid').\
                 apply(lambda x : self.__triplet_iter__(x))
+
+            sys.exit(qpcr_age)
 
             # assign triplets to likelihood types and save qpcr and age of each first triplet
             qpcr_age.apply(lambda x : self.__assign_triplets__(x))
@@ -181,7 +185,7 @@ class TripletModel:
 
         # return negative to minimize
         return -1 * log_lik.sum()
-    def AQ(self, method='Nelder-Mead', bootstrap=False):
+    def AQ(self, method='Nelder-Mead', bootstrap= False):
         if bootstrap:
             self.__bootstrap__()
 
@@ -262,10 +266,12 @@ def main():
 
     # # plot triplet sensitivity estimation by age as afunction of qpcr
     # triplet_by_age(sdo, meta)
-
+    print('loading data...')
     t = TripletModel(sdo, meta)
-    params = np.array([t.AQ() for _ in range(300)])
-    boot_params = np.array([t.AQ(bootstrap=True) for _ in range(300)])
+    print('Starting Triplets...')
+    t.AQ()
+    # params = np.array([t.AQ() for _ in range(300)])
+    # boot_params = np.array([t.AQ(bootstrap=True) for _ in range(300)])
 
     # params = np.array([t.AQ() for _ in range(100)])
     # params
