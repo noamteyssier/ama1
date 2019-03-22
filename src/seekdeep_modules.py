@@ -341,8 +341,15 @@ class HaplotypeUtils:
         return self.filtered
 class SeekDeepUtils:
     """class for various utilities related to SeekDeep output"""
-    def __init__(self):
+    def __init__(self, date_qpcr=True, qpcr_threshold = 0):
         self.sdo = pd.DataFrame()
+
+        # boolean controlling whether to use qpcr fraction or not
+        self.date_qpcr = date_qpcr
+
+        # minimum threshold to use when calculating skips
+        self.qpcr_threshold = qpcr_threshold
+
         pd.set_option('mode.chained_assignment', None) # remove settingwithcopywarning
     def __recalculate_population_fractions__(self):
         self.sdo = self.sdo.\
@@ -391,17 +398,34 @@ class SeekDeepUtils:
             how = 'left'
         )
 
-        long_cid['h_fraction'] = long_cid.apply(
-            lambda x : x.c_AveragedFrac * x.qpcr, axis = 1)
+        # create haplotype qpcr fractions
+        long_cid['h_fraction'] = long_cid['c_AveragedFrac'] * long_cid['qpcr']
 
-        wide_cid = long_cid[['date', 'cohortid', 'h_popUID', 'h_fraction']].pivot(
-            index='h_popUID',
-            columns = 'date',
-            values = 'h_fraction')
+        if self.date_qpcr:
+
+            qpcr_vals = long_cid[['date', 'qpcr']].drop_duplicates().qpcr.values
+
+            #pivot and transpose
+            wide_cid = long_cid.pivot(index='h_popUID', columns='date', values='qpcr').T
+
+            # replace all values with qpcr date values
+            for i in range(wide_cid.shape[1]):
+                wide_cid.iloc[:,i] = qpcr_vals
+
+            # transpose
+            wide_cid = wide_cid.T
+
+        else:
+            wide_cid = long_cid[['date', 'cohortid', 'h_popUID', 'h_fraction']].pivot(
+                index='h_popUID',
+                columns = 'date',
+                values = 'h_fraction')
 
         wide_cid = wide_cid[~wide_cid.index.isna()]
+
+        # returns True if above the given qpcr threshold (default 0)
         if boolArray:
-            return ~wide_cid.isna()
+            return wide_cid > self.qpcr_threshold
         else:
             return wide_cid
     def __all_timelines__(self):
@@ -478,8 +502,12 @@ class SeekDeepUtils:
         return l
     def __arrange_skips__(self, row, cid):
         """create a dataframe from lists created in __calculate_skips__"""
-        # add the position of the initial infection as the first skip
-        row.skips = np.insert(row.skips, 0, row.i_events[0])
+        try:
+            # add the position of the initial infection as the first skip
+            row.skips = np.insert(row.skips, 0, row.i_events[0])
+        except IndexError:
+            # case where no infections found above given qpcr threshold
+            return None
 
         # create and return a dataframe
         return pd.DataFrame({

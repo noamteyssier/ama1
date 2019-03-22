@@ -5,6 +5,7 @@ import numpy as np
 import seaborn as sns
 import sys, re
 
+from numpy.random import choice
 from scipy.optimize import minimize
 from scipy.special import expit
 from scipy.stats import gaussian_kde
@@ -20,14 +21,19 @@ class TripletModel:
 
         self.sdo = pd.DataFrame()
         self.meta = pd.DataFrame()
+        self.merged_meta_sdo = pd.DataFrame()
+        self.original_mms = pd.DataFrame()
 
         self.likelihood_types = {
             'age' : [np.array([]), np.array([]), np.array([]), np.array([])],
             'qpcr' : [np.array([]), np.array([]), np.array([]), np.array([])]}
 
+        # bool to avoid doubling work
+        self.likelihoods_created = False
+
         self.__load_sdo__()
         self.__load_meta__()
-        self.__create_likelihood_type_arrays__()
+        self.__merge_data__()
     def __load_sdo__(self):
         """load in seekdeep output data"""
         self.sdo = pd.read_csv(self.sdo_fn, sep="\t")[['s_Sample', 'h_popUID', 'c_AveragedFrac']]
@@ -46,7 +52,7 @@ class TripletModel:
         self.sdo = self.sdo.drop(columns = 's_Sample')
     def __load_meta__(self):
         """load in cohort meta data"""
-        self.meta = pd.read_stata(self.meta_fn)[['cohortid', 'date', 'ageyrs', 'qpcr', 'visittype', 'malariacat']]
+        self.meta = pd.read_stata(self.meta_fn)[['cohortid', 'date', 'ageyrs', 'qpcr', 'visittype', 'malariacat', 'agecat']]
 
         # cid filter
         self.meta = self.meta[self.meta.cohortid.isin(self.sdo.cohortid)]
@@ -56,6 +62,28 @@ class TripletModel:
 
         # convert to datetime
         self.meta.date = pd.to_datetime(self.meta.date, format='%Y-%m-%d')
+    def __merge_data__(self):
+        """merge meta and seekdeep output"""
+        self.merged_meta_sdo = self.meta.merge(
+            self.sdo,
+            how='left',
+            left_on=['cohortid', 'date'],
+            right_on=['cohortid', 'date'])
+        self.original_mms = self.merged_meta_sdo.copy()
+    def __bootstrap__(self):
+        """sample original dataframe with replacement"""
+        cids = self.original_mms.cohortid.unique()
+        cid_sampling = choice(cids, cids.size)
+
+        dfs = []
+        for i,c in enumerate(cid_sampling):
+            p = self.original_mms[self.original_mms.cohortid == c]
+            p = p.drop(columns = 'cohortid')
+            p['cohortid'] = i
+            dfs.append(p)
+
+        self.merged_meta_sdo = pd.concat(dfs)
+        self.likelihoods_created = False
     def __window_stack__(self, arr):
         """stack sliding windows as a matrix"""
         return np.array([arr[i:i+3] for i in range(arr.size-2)])
@@ -122,17 +150,21 @@ class TripletModel:
         - grow lists of each class type for age and qpcr
             - take first of each triplet for age/qpcr
         """
-        merged_meta_sdo = self.meta.merge(
-            self.sdo,
-            how='left',
-            left_on=['cohortid', 'date'],
-            right_on=['cohortid', 'date'])
+        if not self.likelihoods_created:
+            # series {cohortid : [qpcr_triplet_matrix, age_triplet_matrix]}
 
-        # series {cohortid : [qpcr_triplet_matrix, age_triplet_matrix]}
-        qpcr_age = merged_meta_sdo.groupby('cohortid').apply(lambda x : self.__triplet_iter__(x))
+            ## Apply bootstrapping on this variable instead of on the MMS df
+            qpcr_age = self.merged_meta_sdo.\
+                groupby('cohortid').\
+                apply(lambda x : self.__triplet_iter__(x))
 
-        # assign triplets to likelihood types and save qpcr and age of each first triplet
-        qpcr_age.apply(lambda x : self.__assign_triplets__(x))
+            sys.exit(qpcr_age)
+
+            # assign triplets to likelihood types and save qpcr and age of each first triplet
+            qpcr_age.apply(lambda x : self.__assign_triplets__(x))
+
+            # flip switch
+            self.likelihoods_created = True
     def __l1__(self, theta, idx=1):
         m = expit(theta[0] + theta[1] * self.likelihood_types['age'][idx])
         s = expit(theta[2] + theta[3] * self.likelihood_types['qpcr'][idx])
@@ -153,15 +185,27 @@ class TripletModel:
 
         # return negative to minimize
         return -1 * log_lik.sum()
+    def AQ(self, method='Nelder-Mead', bootstrap= False):
+        if bootstrap:
+            self.__bootstrap__()
 
+        self.__create_likelihood_type_arrays__()
 
-    def AQ(self):
         theta = np.random.random(4)
-        m = minimize(
+        self.min = minimize(
             self.__calculate_likelihood_aq__,
             theta,
-            method='Nelder-Mead')
-        return m.x
+            method=method)
+
+        if not self.min.success:
+            self.AQ(method, bootstrap=False)
+
+        return self.min.x
+    def set_agecat(self, given_agecat):
+        """set age category for dataset"""
+        self.agecat_label = given_agecat
+        self.merged_meta_sdo = self.merged_meta_sdo[
+            self.merged_meta_sdo.agecat == given_agecat]
 def maximize_density(vec, plot=False):
     """estimate kernel, take argmax of pdf"""
     g = gaussian_kde(vec)
@@ -175,38 +219,71 @@ def plot_params(params):
     sns.kdeplot(params[:,1], shade=True)
     sns.kdeplot(params[:,2], shade=True)
     sns.kdeplot(params[:,3], shade=True)
-def plot_waning_rate_by_age(param_density_max):
+def plot_waning_rate_by_age(param_density_max, label=None, show=True):
     """
     show waning rate as a function of age
     M = expit(b0 + (b1 * age))
     """
     x = np.linspace(0,50, 1000)
     y = 1 / expit(param_density_max[0] + param_density_max[1] * x)
-    sns.lineplot(x=x, y=y)
-    plt.show()
-def plot_sensitivity_by_qpcr(param_density_max):
+    sns.lineplot(x=x, y=y, label=label)
+    if show:
+        plt.show()
+def plot_sensitivity_by_qpcr(param_density_max, label=None, show=True):
     """
     show sensitivity as a function of qpcr
     S = expit(b2 + (b3 * age))
     """
     x = np.linspace(0.1, 6, 1000)
     y = expit(param_density_max[2] + param_density_max[3] * x)
-    sns.lineplot(x=x, y=y)
+
+    sns.lineplot(x=x, y=1-y, label=label)
+    if show:
+        plt.show()
+def triplet_by_age(sdo, meta):
+    five_minus = TripletModel(sdo, meta)
+    five_to_fifteen = TripletModel(sdo, meta)
+    fifteen_plus = TripletModel(sdo, meta)
+
+    five_minus.set_agecat('< 5 years')
+    five_to_fifteen.set_agecat('5-15 years')
+    fifteen_plus.set_agecat('16 years or older')
+
+    for i in [five_minus, five_to_fifteen, fifteen_plus]:
+        params = np.array([i.AQ() for _ in range(100)])
+        param_density_max = [maximize_density(params[:,i]) for i in range(4)]
+        plot_sensitivity_by_qpcr(param_density_max, label = i.agecat_label, show=False)
+
+    plt.xlabel('QPCR (log10)')
+    plt.ylabel("Probability of Miss (triplet_model)")
     plt.show()
+
+    sys.exit()
 def main():
     sdo = "../prism2/full_prism2/filtered_5pc_10r.tab"
     meta = "../prism2/stata/allVisits.dta"
 
 
+    # # plot triplet sensitivity estimation by age as afunction of qpcr
+    # triplet_by_age(sdo, meta)
+    print('loading data...')
     t = TripletModel(sdo, meta)
-    params = np.array([t.AQ() for _ in range(100)])
+    print('Starting Triplets...')
+    t.AQ()
+    # params = np.array([t.AQ() for _ in range(300)])
+    # boot_params = np.array([t.AQ(bootstrap=True) for _ in range(300)])
 
-    plot_params(params)
-    param_density_max = [maximize_density(params[:,i]) for i in range(4)]
-
-
-    plot_waning_rate_by_age(param_density_max)
-    plot_sensitivity_by_qpcr(param_density_max)
+    # params = np.array([t.AQ() for _ in range(100)])
+    # params
+    #
+    # sys.exit()
+    #
+    # plot_params(params)
+    # param_density_max = [maximize_density(params[:,i]) for i in range(4)]
+    #
+    #
+    # plot_waning_rate_by_age(param_density_max)
+    # plot_sensitivity_by_qpcr(param_density_max)
 
 
 
