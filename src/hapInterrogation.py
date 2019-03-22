@@ -36,6 +36,10 @@ def get_args():
         help="Default duration rate to use for single event infections (default = 15 days)")
     p.add_argument('-b', '--burnin', default='2018-01-01', type=str,
         help="Date to begin considering new infections (YYYY-MM-DD)")
+    p.add_argument('-t', '--qpcr_threshold', default=0, type=float,
+        help="qpcr threshold to consider an infection true or false")
+    p.add_argument('-q', '--qpcr_flag', action='store_true',
+        help="use pcr of the date instead of the true false of the haplotype")
 
     # if no args given print help
     if len(sys.argv) == 1:
@@ -54,7 +58,7 @@ def main():
     meta = pd.read_stata(args.meta)
 
     # initialize modules
-    s = SeekDeepUtils()
+    s = SeekDeepUtils(date_qpcr=args.qpcr_flag, qpcr_threshold=args.qpcr_threshold)
 
     # calculate allele frequency
     if args.allele_frequency:
