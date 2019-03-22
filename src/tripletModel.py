@@ -5,6 +5,7 @@ import numpy as np
 import seaborn as sns
 import sys, re
 
+from numpy.random import choice
 from scipy.optimize import minimize
 from scipy.special import expit
 from scipy.stats import gaussian_kde
@@ -20,6 +21,8 @@ class TripletModel:
 
         self.sdo = pd.DataFrame()
         self.meta = pd.DataFrame()
+        self.merged_meta_sdo = pd.DataFrame()
+        self.original_mms = pd.DataFrame()
 
         self.likelihood_types = {
             'age' : [np.array([]), np.array([]), np.array([]), np.array([])],
@@ -66,6 +69,21 @@ class TripletModel:
             how='left',
             left_on=['cohortid', 'date'],
             right_on=['cohortid', 'date'])
+        self.original_mms = self.merged_meta_sdo.copy()
+    def __bootstrap__(self):
+        """sample original dataframe with replacement"""
+        cids = self.original_mms.cohortid.unique()
+        cid_sampling = choice(cids, cids.size)
+
+        dfs = []
+        for i,c in enumerate(cid_sampling):
+            p = self.original_mms[self.original_mms.cohortid == c]
+            p = p.drop(columns = 'cohortid')
+            p['cohortid'] = i
+            dfs.append(p)
+
+        self.merged_meta_sdo = pd.concat(dfs)
+        self.likelihoods_created = False
     def __window_stack__(self, arr):
         """stack sliding windows as a matrix"""
         return np.array([arr[i:i+3] for i in range(arr.size-2)])
@@ -163,13 +181,21 @@ class TripletModel:
 
         # return negative to minimize
         return -1 * log_lik.sum()
-    def AQ(self, method='Nelder-Mead'):
+    def AQ(self, method='Nelder-Mead', bootstrap=False):
+        if bootstrap:
+            self.__bootstrap__()
+
         self.__create_likelihood_type_arrays__()
+
         theta = np.random.random(4)
         self.min = minimize(
             self.__calculate_likelihood_aq__,
             theta,
             method=method)
+
+        if not self.min.success:
+            self.AQ(method, bootstrap=False)
+
         return self.min.x
     def set_agecat(self, given_agecat):
         """set age category for dataset"""
@@ -229,23 +255,29 @@ def triplet_by_age(sdo, meta):
     plt.show()
 
     sys.exit()
-
 def main():
     sdo = "../prism2/full_prism2/filtered_5pc_10r.tab"
     meta = "../prism2/stata/allVisits.dta"
 
 
+    # # plot triplet sensitivity estimation by age as afunction of qpcr
+    # triplet_by_age(sdo, meta)
 
+    t = TripletModel(sdo, meta)
+    params = np.array([t.AQ() for _ in range(300)])
+    boot_params = np.array([t.AQ(bootstrap=True) for _ in range(300)])
 
-    # plot triplet sensitivity estimation by age as afunction of qpcr
-    triplet_by_age(sdo, meta)
-
-    plot_params(params)
-    param_density_max = [maximize_density(params[:,i]) for i in range(4)]
-
-
-    plot_waning_rate_by_age(param_density_max)
-    plot_sensitivity_by_qpcr(param_density_max)
+    # params = np.array([t.AQ() for _ in range(100)])
+    # params
+    #
+    # sys.exit()
+    #
+    # plot_params(params)
+    # param_density_max = [maximize_density(params[:,i]) for i in range(4)]
+    #
+    #
+    # plot_waning_rate_by_age(param_density_max)
+    # plot_sensitivity_by_qpcr(param_density_max)
 
 
 
