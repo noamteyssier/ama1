@@ -2,7 +2,10 @@
 
 import pandas as pd
 import numpy as np
+import seaborn as sns
 import sys
+
+sns.set(rc={'figure.figsize':(15, 12), 'lines.linewidth': 5})
 
 class ExpObs:
     pd.set_option('mode.chained_assignment', None) # remove settingwithcopywarning
@@ -60,17 +63,14 @@ class ExpObs:
             h_popUID.\
             value_counts()
         self.hapFreq = self.hapFreq / self.hapFreq.sum()
-    def __pivot_cid__(self, x):
-        """pivot cohortid"""
-        pv = x.pivot(index = 'h_popUID', columns = 'date', values = 'c_AveragedFrac')
-        pv = pv.loc[~pv.index.isna()]
-        return pv > 0
     def __timeline__(self):
         """generate timelines for each cohortid"""
         self.timelines = self.pr2.pivot_table(
             values = 'c_AveragedFrac',
             index=['cohortid', 'h_popUID'],
-            columns='date').fillna(0)
+            columns='date', dropna=False).\
+            dropna(axis=0, how='all')
+        self.timelines = (self.timelines > 0).astype('int')
     def __cid_dates__(self):
         """create a series indexed by cid for all dates of that cid"""
         self.cid_dates = self.pr2[['cohortid', 'date']].\
@@ -78,14 +78,23 @@ class ExpObs:
             groupby('cohortid').\
             apply(lambda x : x.date.values)
     def __exp_v_obs__(self, x):
+        """calculate expected vs observed across timelines by cid"""
         cid = x.name
         haps = [i for _,i in x.index.values]
-        timeline = x.loc[:,self.cid_dates[cid]]
 
+        # index timeline for cid~dates
+        timeline = x.loc[:,self.cid_dates[cid]]#.fillna(0)
+
+        # not enough entries in timeline to call
+        if timeline.shape[1] < self.skips:
+            return 0, 0
+
+        # prepare arrays for observed and expected
         obs = np.zeros(timeline.shape[1] - self.skips)
         exp = np.zeros(timeline.shape[1] - self.skips)
 
-        for i in range(self.skips, timeline.iloc[:,self.skips:].shape[1]):
+        # iterate through timelines
+        for i in range(self.skips, timeline.shape[1]):
 
             # calculate observed
             t_i = timeline.iloc[:,i].values
@@ -93,18 +102,29 @@ class ExpObs:
             obs[i - self.skips] = (t_i + t_is > 1).sum()
 
             # calculate expected
-            t_fs = self.hapFreq[haps].values * t_is
-            t_f = np.dot(t_fs, t_i)
+            t_fs = (self.hapFreq[haps].values * t_is).sum()
+            t_f = (t_fs * t_i).sum()
             exp[i - self.skips] = t_f
 
-        print(obs)
-        print(exp)
-
-    def fit(self, s = 1):
+        # sum arrays and return
+        return exp.sum(), obs.sum()
+    def fit(self, s = 0):
+        """run multiple skip evaluations for expected and observed values"""
         self.skips = s + 1
-        self.timelines.groupby(level=0).apply(lambda x : self.__exp_v_obs__(x))
+        eo = self.timelines.\
+            groupby(level=0).\
+            apply(lambda x : self.__exp_v_obs__(x))
 
+        # pooled numerator and denominator for unweighted estimation
+        exp = np.array([i for i,j in eo.values]).sum()
+        obs = np.array([j for i,j in eo.values]).sum()
 
+        if obs != 0:
+            obs_v_exp = obs.sum() / exp.sum()
+        else:
+            obs_v_exp = 0
+
+        return obs_v_exp
 
 
 def main():
@@ -114,10 +134,14 @@ def main():
     sdo = pd.read_csv(sdo_fn, sep='\t')
     meta = pd.read_stata(meta_fn)
 
+    # calculate Expected and Observed for skip vals in range
     eo = ExpObs(sdo, meta)
-    eo.fit()
+    skip_vals = np.array([eo.fit(s=i) for i in range(9)])
 
-    pass
+    # plot EO against number of skips
+    p = pd.DataFrame({'skips' : range(9), 'vals' : skip_vals })
+    sns.lineplot(data=p, x='skips', y = 'vals')
+
 
 
 if __name__ == '__main__':
