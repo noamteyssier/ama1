@@ -70,7 +70,7 @@ class ExpObs:
         self.timelines = self.pr2.pivot_table(
             values = 'c_AveragedFrac',
             index=['cohortid', 'h_popUID'],
-            columns='date')#.reset_index()
+            columns='date').fillna(0)
     def __cid_dates__(self):
         """create a series indexed by cid for all dates of that cid"""
         self.cid_dates = self.pr2[['cohortid', 'date']].\
@@ -82,15 +82,27 @@ class ExpObs:
         haps = [i for _,i in x.index.values]
         timeline = x.loc[:,self.cid_dates[cid]]
 
-        print(timeline)
+        obs = np.zeros(timeline.shape[1] - self.skips)
+        exp = np.zeros(timeline.shape[1] - self.skips)
 
-        sys.exit()
+        for i in range(self.skips, timeline.iloc[:,self.skips:].shape[1]):
 
-    def fit(self, s=0):
-        self.skips = s+1
+            # calculate observed
+            t_i = timeline.iloc[:,i].values
+            t_is = timeline.iloc[:,i-self.skips].values
+            obs[i - self.skips] = (t_i + t_is > 1).sum()
+
+            # calculate expected
+            t_fs = self.hapFreq[haps].values * t_is
+            t_f = np.dot(t_fs, t_i)
+            exp[i - self.skips] = t_f
+
+        print(obs)
+        print(exp)
+
+    def fit(self, s = 1):
+        self.skips = s + 1
         self.timelines.groupby(level=0).apply(lambda x : self.__exp_v_obs__(x))
-        # self.timelines.groupby(['cohortid', 'h_popUID']).apply(lambda x : self.__exp_v_obs__(x))
-        # print(self.timelines.loc[3001, self.cid_dates[3001]])
 
 
 
