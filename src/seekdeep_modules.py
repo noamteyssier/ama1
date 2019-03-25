@@ -437,15 +437,15 @@ class SeekDeepUtils:
         return {cid : self.__generate_timeline__(cid, boolArray=True) for cid in self.sdo.cohortid.unique()}
     def __infection_labeller__(self, row, allowedSkips):
         """label infections as true or false"""
-        # first visit is always false
-        if row.visit_num == 1:
+        # visits before burnin are false
+        if row.date <= self.burnin:
             return False
         # first infection occurs at a timepoint past the allowed skips
         elif row.skips > allowedSkips :
             return True
-        # first infection is before the skip threshold but there is a gap between the first visit and the first infection
-        elif row.skips > 0 and row.visit_num <= allowedSkips:
-            return False
+        # if infection is never seen before and after burnin then true
+        elif row.skips == row.visit_num - 1:
+            return True
         else:
             return False
     def __label_new_infections__(self, allowedSkips):
@@ -602,7 +602,7 @@ class SeekDeepUtils:
     def __prepare_meta__(self, meta):
         """prepare meta data for usage in timeline generation"""
         self.meta = meta[['date', 'cohortid', 'qpcr', 'agecat']]
-        self.meta['date'] = self.meta['date'].astype('str')
+        self.meta['date'] = pd.to_datetime(self.meta['date'])
         self.meta['cohortid'] = self.meta['cohortid'].astype('str')
         self.meta.sort_values(by='date', inplace=True)
         self.meta = self.meta[~self.meta.qpcr.isna()]
@@ -620,6 +620,8 @@ class SeekDeepUtils:
         self.sdo[['date', 'cohortid']] = self.sdo.apply(
             lambda x : self.__split_cid_date__(x),
             axis = 1, result_type = 'expand')
+
+        self.sdo.date = pd.to_datetime(self.sdo.date)
 
         return self.sdo
     def __prepare_durations__(self, duration_list):
@@ -668,6 +670,9 @@ class SeekDeepUtils:
                 skip_dataframe.append(self.__arrange_skips__(row, cid))
 
         self.skip_df = pd.concat(skip_dataframe)
+
+        self.skip_df.date = pd.to_datetime(self.skip_df.date)
+
         return self.skip_df
     def __prepare_new_infections__(self, cids, hids, new_ifx):
         """prepare new infections dataframe for downstream usage"""
@@ -955,39 +960,41 @@ class SeekDeepUtils:
         return self.durations
     def Old_New_Infection_Labels(self, sdo, meta, controls=False, allowedSkips = 3, default=15, burnin='2018-01-01'):
         """labels cid~hid infections that developed past a burn-in date as new else old"""
+        self.burnin = pd.to_datetime(burnin)
+
         self.__prepare_sdo__(sdo, controls)
         self.__prepare_meta__(meta)
         self.__prepare_skips__()
         self.__label_new_infections__(allowedSkips)
 
-        self.skip_df.date = pd.to_datetime(self.skip_df.date)
-        self.burnin = pd.to_datetime(burnin)
 
         hit_labels = self.skip_df.\
             groupby(['cohortid', 'h_popUID']).\
             apply(lambda x : self.__label_haplotype_infection_type__(x))
 
         return hit_labels
-    def New_Infections(self, sdo, meta, controls=False, allowedSkips = 3):
+    def New_Infections(self, sdo, meta, controls=False, allowedSkips = 3, burnin='2018-01-01'):
         """calculates number of new infections for each haplotype in each cohortid with allowed skips"""
+        self.burnin = pd.to_datetime(burnin)
+
         self.__prepare_sdo__(sdo, controls)
         self.__prepare_meta__(meta)
         self.__prepare_skips__()
+
+
         self.__label_new_infections__(allowedSkips)
 
         return self.skip_df
     def Force_of_Infection(self, sdo, meta, controls=False, foi_method = 'all', allowedSkips = 3, default=15, burnin = '2018-01-01'):
         """calculate force of infection for a dataset"""
+        self.burnin = pd.to_datetime(burnin)
+
         self.__prepare_sdo__(sdo)
         self.__prepare_meta__(meta)
         self.__prepare_skips__()
         self.__label_new_infections__(allowedSkips)
         self.sdo = self.sdo.merge(self.skip_df, how='left')
 
-        self.sdo.date = pd.to_datetime(self.sdo.date, format="%Y-%m-%d")
-        self.skip_df.date = pd.to_datetime(self.skip_df.date)
-        self.meta.date = pd.to_datetime(self.meta.date)
-        self.burnin = pd.to_datetime(burnin)
 
         if foi_method == 'all':
             return self.__foi_method_all__()
