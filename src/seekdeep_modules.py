@@ -437,21 +437,15 @@ class SeekDeepUtils:
         return {cid : self.__generate_timeline__(cid, boolArray=True) for cid in self.sdo.cohortid.unique()}
     def __infection_labeller__(self, row, allowedSkips):
         """label infections as true or false"""
-
-        # # first visit is always false
-        # if row.visit_num == 1:
-        #     return False
+        # visits before burnin are false
         if row.date <= self.burnin:
             return False
         # first infection occurs at a timepoint past the allowed skips
         elif row.skips > allowedSkips :
             return True
-
-        # # first infection is before the skip threshold but there is a gap between the first visit and the first infection
-        # elif row.skips > 0 and row.visit_num <= allowedSkips:
-        #     print(row)
-        #     sys.exit()
-        #     return False
+        # if infection is never seen before and after burnin then true
+        elif row.skips == row.visit_num - 1:
+            return True
         else:
             return False
     def __label_new_infections__(self, allowedSkips):
@@ -993,16 +987,14 @@ class SeekDeepUtils:
         return self.skip_df
     def Force_of_Infection(self, sdo, meta, controls=False, foi_method = 'all', allowedSkips = 3, default=15, burnin = '2018-01-01'):
         """calculate force of infection for a dataset"""
+        self.burnin = pd.to_datetime(burnin)
+
         self.__prepare_sdo__(sdo)
         self.__prepare_meta__(meta)
         self.__prepare_skips__()
         self.__label_new_infections__(allowedSkips)
         self.sdo = self.sdo.merge(self.skip_df, how='left')
 
-        self.sdo.date = pd.to_datetime(self.sdo.date, format="%Y-%m-%d")
-        self.skip_df.date = pd.to_datetime(self.skip_df.date)
-        self.meta.date = pd.to_datetime(self.meta.date)
-        self.burnin = pd.to_datetime(burnin)
 
         if foi_method == 'all':
             return self.__foi_method_all__()
