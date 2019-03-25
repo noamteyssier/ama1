@@ -12,11 +12,13 @@ class ExpObs:
 
         self.pr2 = pd.DataFrame()
         self.hapFreq = pd.Series()
-        self.timelines = pd.Series()
+        self.timelines = pd.DataFrame()
+        self.cid_dates = pd.Series()
 
         self.__prepare_df__()
         self.__haplotype_population_frequency__()
         self.__timeline__()
+        self.__cid_dates__()
     def __prepare_df__(self):
         """prepare dataframe for timeline creation"""
         self.__prepare_sdo__()
@@ -65,10 +67,31 @@ class ExpObs:
         return pv > 0
     def __timeline__(self):
         """generate timelines for each cohortid"""
-        self.timelines = self.pr2.groupby('cohortid').apply(lambda x : self.__pivot_cid__(x))
+        self.timelines = self.pr2.pivot_table(
+            values = 'c_AveragedFrac',
+            index=['cohortid', 'h_popUID'],
+            columns='date')#.reset_index()
+    def __cid_dates__(self):
+        """create a series indexed by cid for all dates of that cid"""
+        self.cid_dates = self.pr2[['cohortid', 'date']].\
+            drop_duplicates().\
+            groupby('cohortid').\
+            apply(lambda x : x.date.values)
+    def __exp_v_obs__(self, x):
+        cid = x.name
+        haps = [i for _,i in x.index.values]
+        timeline = x.loc[:,self.cid_dates[cid]]
+
+        print(timeline)
+
+        sys.exit()
+
     def fit(self, s=0):
         self.skips = s+1
-        print(self.timelines.loc[3001])
+        self.timelines.groupby(level=0).apply(lambda x : self.__exp_v_obs__(x))
+        # self.timelines.groupby(['cohortid', 'h_popUID']).apply(lambda x : self.__exp_v_obs__(x))
+        # print(self.timelines.loc[3001, self.cid_dates[3001]])
+
 
 
 
