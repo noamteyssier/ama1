@@ -6,6 +6,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import sys, warnings
 sns.set(rc={'figure.figsize':(15, 12), 'lines.linewidth': 5})
+np.random.seed(42)
 
 class Survival:
     pd.set_option('mode.chained_assignment', None) # remove settingwithcopywarning
@@ -24,6 +25,11 @@ class Survival:
         self.column_bins = np.array([])
 
         self.__prepare_df__()
+
+        # subsetting
+        cids = np.random.choice(self.sdo['cohortid'].drop_duplicates(), 15)
+        self.pr2 = self.pr2[self.pr2.cohortid.isin(cids)]
+
         self.__timeline__()
         self.__cid_dates__()
         self.__label_new_infections__()
@@ -35,9 +41,14 @@ class Survival:
         self.pr2 = self.meta.merge(self.sdo, how='left')
     def __prepare_meta__(self):
         """prepare meta data for usage in timeline generation"""
-        self.meta = self.meta[['date', 'cohortid', 'qpcr']]
+        self.agecat_rename = {
+            '< 5 years'  : 1,
+            '5-15 years' : 2,
+            '16 years or older' : 3}
+        self.meta = self.meta[['date', 'cohortid', 'qpcr', 'agecat']]
         self.meta['date'] = self.meta['date'].astype('str')
         self.meta['cohortid'] = self.meta['cohortid'].astype('int')
+        self.meta['agecat'] = self.meta.agecat.apply(lambda x : self.agecat_rename[x])
         self.meta.sort_values(by='date', inplace=True)
         self.meta = self.meta[~self.meta.qpcr.isna()]
     def __prepare_sdo__(self, controls=False):
@@ -232,8 +243,8 @@ def main():
 
     # calculate Expected and Observed for skip vals in range
     s = Survival(sdo, meta)
-    s.OldNewSurvival()
-    s.CID_oldnewsurvival()
+    # s.OldNewSurvival()
+    # s.CID_oldnewsurvival()
 
 if __name__ == '__main__':
     main()
