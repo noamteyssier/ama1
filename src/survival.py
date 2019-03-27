@@ -20,23 +20,16 @@ class Survival:
         self.pr2 = pd.DataFrame()
         self.timelines = pd.DataFrame()
         self.cid_dates = pd.Series()
-        self.old_new = pd.DataFrame()
+        self.infections = pd.DataFrame()
+        self.mass_reindex = []
         self.date_bins = np.array([])
         self.column_bins = np.array([])
 
         self.__prepare_df__()
-
-        # subsetting
-        # cids = np.random.choice(self.sdo['cohortid'].drop_duplicates(), 15)
-        # self.pr2 = self.pr2[self.pr2.cohortid.isin(cids)]
-
-        self.mass_reindex = []
-
-
         self.__timeline__()
         self.__cid_dates__()
         self.__label_new_infections__()
-        # self.__bin_dates__()
+        self.__bin_dates__()
     def __prepare_df__(self):
         """prepare dataframe for timeline creation"""
         self.__prepare_sdo__()
@@ -92,20 +85,18 @@ class Survival:
             apply(lambda x : x.date.values)
     def __bin_dates__(self):
         """bin columns (dates) into 12 evenly spaced windows based on first and last visit"""
-        dates = pd.to_datetime(self.old_new.columns.values)
-        self.date_bins = pd.date_range(dates[0], dates[-1], periods=13)
+        dates = pd.to_datetime(self.infections.date.unique())
+        self.date_bins = pd.date_range(dates.min(), dates.max(), periods=13)
 
-        counter = 0
-        idx = []
-        for d in dates:
-            if d <= self.date_bins[counter]:
-                idx.append(counter)
-            else:
-                counter += 1
-                idx.append(counter)
-        idx[0] += 1
+        dfs = []
+        for i in range(1, self.date_bins.size):
+            a = np.where((dates < self.date_bins[i]) & (dates >= self.date_bins[i-1]))[0]
+            p = pd.DataFrame({'date_bin' : self.date_bins[i], 'date' : dates[a]})
+            dfs.append(p)
 
-        self.column_bins = np.array(idx)
+        self.date_bins = pd.concat(dfs)
+        self.infections = self.infections.\
+            merge(self.date_bins)
     def __get_skips__(self, x):
         """return skips for timeline row"""
         # find all infection events
@@ -169,7 +160,7 @@ class Survival:
         self.mass_reindex.append([cid, hid, i_state, dates])
     def __label_new_infections__(self):
         """create old and new infection timelines"""
-        t1 = time.time()
+        # find infection times
         self.infections = self.timelines.\
             groupby(level=[0,1], sort=False).\
             apply(lambda x : self.__type_labeller__(x)).\
@@ -178,87 +169,89 @@ class Survival:
             to_frame('ifx')
         self.infections.index.names = ['cohortid', 'hid', 'ifx_num']
 
+        # split multiple infections to separate observations
         self.infections.groupby(level=[0,1,2], sort=False).\
             apply(lambda x : self.__mark_timeline__(x))
 
-        a = pd.DataFrame(self.mass_reindex)
-        a.columns = ['cohortid', 'hid', 'val', 'date']
-        b = a.date.\
+        # split infection dates to separate observations
+        self.infections = pd.DataFrame(self.mass_reindex)
+        self.infections.columns = ['cohortid', 'hid', 'val', 'date']
+        wide_form = self.infections.date.\
             apply(pd.Series).\
-            merge(a.drop(columns='date'), left_index=True, right_index=True)
-        c = pd.melt(b, id_vars = ['cohortid', 'hid', 'val']).drop(columns = 'variable').fillna('nope')
-        c = c[c.value != 'nope']
+            merge(self.infections.drop(columns='date'), left_index=True, right_index=True)
 
-        d = c.pivot_table(
-            values = 'val',
-            index=['cohortid', 'hid'],
-            columns='value', dropna=False).\
-            dropna(axis=0, how='all').fillna(0)
+        self.infections = pd.melt(
+                wide_form,
+                id_vars = ['cohortid', 'hid', 'val']).\
+            drop(columns = 'variable').\
+            fillna('nope')
 
-        self.old_new = d
+        # drop NAs from melted dataframe
+        self.infections = self.infections[self.infections.value != 'nope']
+
+        # rename columns
+        self.infections.columns = ['cohortid', 'hid', 'val', 'date']
+
+        # convert date column to datetime
+        self.infections.date = pd.to_datetime(self.infections.date)
     def OldNewSurvival(self):
         """plot proportion of haplotypes are old v new in population"""
-        tw = range(1, self.date_bins.size)
+        def cid_hid_cat_count(x):
+            return x[['cohortid','hid']].drop_duplicates().shape[0]
 
-        windows = []
-        # iterate through date windows
-        for i in tw:
-            t = self.old_new.iloc[:,np.where(self.column_bins == i)[0]]
-            print(t)
-            row_vals = t.apply(lambda x : np.unique(x).sum(), axis = 1)
-            vals, count = np.unique(row_vals.values, return_counts=True)
-            p = pd.DataFrame({
-                'window' : i,
-                'type' : vals,
-                'counts' : count
-            })
-            windows.append(p)
 
-        windows = pd.concat(windows)
-        self.plot_windows(windows)
+        chc_counts = self.infections.\
+            groupby(['date_bin', 'val']).\
+            apply(lambda x : cid_hid_cat_count(x)).\
+            reset_index().\
+            rename(columns = {0 : 'counts'})
+
+        piv = chc_counts.pivot(index='date', columns='val', values='counts')
+        date_sums = piv.sum(axis=1)
+        piv = piv.apply(lambda x : x / date_sums, axis=0).reset_index()
+        df = pd.melt(piv, id_vars='date', var_name='old_new', value_name='pc')
+        df['old_new'] = df.old_new.apply(lambda x : 'old' if x==1 else 'new')
+
+
+        sns.lineplot(data=df, x='date', y='pc', hue='old_new')
+        plt.show()
     def CID_oldnewsurvival(self):
         """plot proportion of people with old v new v mixed"""
-        tw = range(1, self.date_bins.size)
+        def cid_cat_count(x, mix=True):
+            return x['val'].unique().sum()
+        def date_cat_count(x):
+            return x.cohortid.drop_duplicates().shape[0]
 
-        windows = []
-        # iterate through date windows
-        for i in tw:
-            t = self.old_new.iloc[:,np.where(self.column_bins == i)[0]]
-            cid_vals = t.groupby(level=0).apply(lambda x : np.unique(x).sum())
-
-            vals, count = np.unique(cid_vals.values, return_counts=True)
-
-            p = pd.DataFrame({
-                'window' : i,
-                'type' : vals,
-                'counts' : count
-            })
-            windows.append(p)
-
-        windows = pd.concat(windows)
-        self.plot_windows(windows)
-    def plot_windows(self, windows):
-        date_bins = pd.DataFrame({'t' : range(1, self.date_bins.size), 'bins' : self.date_bins[:-1]})
-
-        # remove zeros
-        w = pd.pivot(windows, index='window', columns = 'type', values='counts').drop(columns=0)
-
-        # calculate window sums
-        sums = w.sum(axis = 1)
-
-        # normalize windows to sum
-        # convert to long
-        # get actual window dates
-        fracs = w.apply(lambda x : x/sums, axis =0).\
+        mix_counts = self.infections.\
+            groupby(['cohortid', 'date_bin']).\
+            apply(lambda x : cid_cat_count(x)).\
             reset_index().\
-            melt(id_vars='window').\
-            merge(date_bins, left_on = 'window', right_on='t', how = 'left')
-        # convert flaot to int for hue
-        fracs.type = fracs.type.astype('int')
+            rename(columns = {0 : 'c_val'})
 
-        # plot lines
-        sns.lineplot(data=fracs, x = 'bins', y = 'value', style='type', hue='type')
+        date_counts = mix_counts.groupby(['date_bin', 'c_val']).\
+            apply(lambda x : date_cat_count(x)).\
+            reset_index().\
+            rename(columns = {0 : 'counts'})
 
+        piv = date_counts.\
+            pivot(index='date_bin', columns='c_val', values='counts').\
+            rename(columns = {1 : 'old', 2 : 'new', 3 : 'mix'}).\
+            fillna(0)
+
+        piv['mix_old'] = piv.old + piv.mix
+        piv['mix_new'] = piv.new + piv.mix
+        date_sums = piv[['mix_old', 'mix_new']].sum(axis = 1)
+        piv = piv.\
+            apply(lambda x : x/date_sums, axis = 0).\
+            drop(columns = 'mix').\
+            reset_index()
+
+        df = pd.melt(piv, id_vars = 'date_bin')
+        df['mixed'] = df.c_val.apply(lambda x : 'mix' in x)
+        df['c_val'] = df.c_val.apply(lambda x : x.replace('mix_', ''))
+
+        sns.lineplot(data=df, x='date_bin', y ='value', hue='c_val', style='mixed')
+        plt.show()
 
 def main():
     sdo_fn = "../prism2/full_prism2/filtered_5pc_10r.tab"
@@ -269,8 +262,8 @@ def main():
 
     # calculate Expected and Observed for skip vals in range
     s = Survival(sdo, meta)
-    s.OldNewSurvival()
-    # s.CID_oldnewsurvival()
+    # s.OldNewSurvival()
+    s.CID_oldnewsurvival()
 
 if __name__ == '__main__':
     main()
