@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
-import sys, warnings
+import sys, warnings, time
 sns.set(rc={'figure.figsize':(15, 12), 'lines.linewidth': 5})
 np.random.seed(42)
 
@@ -27,13 +27,16 @@ class Survival:
         self.__prepare_df__()
 
         # subsetting
-        cids = np.random.choice(self.sdo['cohortid'].drop_duplicates(), 15)
-        self.pr2 = self.pr2[self.pr2.cohortid.isin(cids)]
+        # cids = np.random.choice(self.sdo['cohortid'].drop_duplicates(), 15)
+        # self.pr2 = self.pr2[self.pr2.cohortid.isin(cids)]
+
+        self.mass_reindex = []
+
 
         self.__timeline__()
         self.__cid_dates__()
         self.__label_new_infections__()
-        self.__bin_dates__()
+        # self.__bin_dates__()
     def __prepare_df__(self):
         """prepare dataframe for timeline creation"""
         self.__prepare_sdo__()
@@ -109,8 +112,7 @@ class Survival:
         i_event = x.values.nonzero()[1]
 
         # find distances between infection events
-        vals = np.array([
-            i_event[i] - i_event[i-1] for i in range(1, i_event.size)])
+        vals = np.diff(i_event)
 
         # subtract one from distances to reflect true skip size
         return vals - 1
@@ -119,7 +121,7 @@ class Survival:
         i_event = x.values.nonzero()[1]
         if np.all(skips <= self.allowedSkips):
             # one continuous infection
-            return i_event
+            return np.array([i_event, np.nan])
         else:
             # reinfection occurs under allowed skips
             return np.split(i_event, np.where(skips > self.allowedSkips)[0] + 1)
@@ -147,30 +149,53 @@ class Survival:
         return timeline
         """
         cid, hid = x.name
-        # if cid != 3839:
-        #     return
+
         timeline = x.loc[:,self.cid_dates[cid]]
 
         skips = self.__get_skips__(timeline)
         ifx = self.__infection_duration__(timeline, skips)
 
-        timeline[timeline == 0] = np.nan
+        return ifx
+    def __mark_timeline__(self, x):
+        cid, hid, i = x.name
+        vals = x.values[0][0]
+        ifx = np.arange(vals.min(), vals.max() + 1)
+        dates = self.cid_dates[cid][ifx]
+        if pd.to_datetime(dates[0]) <= self.burnin:
+            i_state = 1
+        else:
+            i_state = 2
 
-        # single infection labeller
-        if type(ifx) == np.ndarray:
-            t = self.__timeline_marker__(timeline, ifx)
-
-        # multiple infection labeller
-        if type(ifx) == list:
-            [self.__timeline_marker__(timeline, i) for i in ifx]
-
-        return timeline
+        self.mass_reindex.append([cid, hid, i_state, dates])
     def __label_new_infections__(self):
         """create old and new infection timelines"""
-        self.old_new = self.timelines.\
+        t1 = time.time()
+        self.infections = self.timelines.\
             groupby(level=[0,1], sort=False).\
-            apply(lambda x : self.__type_labeller__(x))
-        self.old_new = self.old_new.fillna(0)
+            apply(lambda x : self.__type_labeller__(x)).\
+            apply(pd.Series).\
+            stack().\
+            to_frame('ifx')
+        self.infections.index.names = ['cohortid', 'hid', 'ifx_num']
+
+        self.infections.groupby(level=[0,1,2], sort=False).\
+            apply(lambda x : self.__mark_timeline__(x))
+
+        a = pd.DataFrame(self.mass_reindex)
+        a.columns = ['cohortid', 'hid', 'val', 'date']
+        b = a.date.\
+            apply(pd.Series).\
+            merge(a.drop(columns='date'), left_index=True, right_index=True)
+        c = pd.melt(b, id_vars = ['cohortid', 'hid', 'val']).drop(columns = 'variable').fillna('nope')
+        c = c[c.value != 'nope']
+
+        d = c.pivot_table(
+            values = 'val',
+            index=['cohortid', 'hid'],
+            columns='value', dropna=False).\
+            dropna(axis=0, how='all').fillna(0)
+
+        self.old_new = d
     def OldNewSurvival(self):
         """plot proportion of haplotypes are old v new in population"""
         tw = range(1, self.date_bins.size)
@@ -179,6 +204,7 @@ class Survival:
         # iterate through date windows
         for i in tw:
             t = self.old_new.iloc[:,np.where(self.column_bins == i)[0]]
+            print(t)
             row_vals = t.apply(lambda x : np.unique(x).sum(), axis = 1)
             vals, count = np.unique(row_vals.values, return_counts=True)
             p = pd.DataFrame({
@@ -243,7 +269,7 @@ def main():
 
     # calculate Expected and Observed for skip vals in range
     s = Survival(sdo, meta)
-    # s.OldNewSurvival()
+    s.OldNewSurvival()
     # s.CID_oldnewsurvival()
 
 if __name__ == '__main__':
