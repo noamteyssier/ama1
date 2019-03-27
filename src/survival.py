@@ -5,8 +5,8 @@ import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
 import sys, warnings, time
-sns.set(rc={'figure.figsize':(15, 12), 'lines.linewidth': 5})
-np.random.seed(42)
+sns.set(rc={'figure.figsize':(15, 12), 'lines.linewidth': 2})
+# np.random.seed(42)
 
 class Survival:
     pd.set_option('mode.chained_assignment', None) # remove settingwithcopywarning
@@ -30,6 +30,8 @@ class Survival:
         self.__cid_dates__()
         self.__label_new_infections__()
         self.__bin_dates__()
+
+        self.original_infections = self.infections.copy()
     def __prepare_df__(self):
         """prepare dataframe for timeline creation"""
         self.__prepare_sdo__()
@@ -194,50 +196,77 @@ class Survival:
 
         # convert date column to datetime
         self.infections.date = pd.to_datetime(self.infections.date)
-    def OldNewSurvival(self):
+    def __bootstrap_cid__(self):
+        """randomly sample with replacement on CID"""
+        c = self.original_infections.cohortid.unique().copy()
+        rc = np.random.choice(c, c.size)
+        self.infections = self.original_infections.copy()
+
+        # calculate index size for each cohortid in random choice
+        cid_size = np.array([np.where(self.infections.cohortid == i)[0].size for i in rc])
+
+        # set index to cohortid
+        self.infections = self.infections.set_index('cohortid')
+
+        # generate bootstrap
+        self.infections = self.infections.loc[rc]
+
+        # create array of new cid_id with expected length
+        new_cid = np.concatenate([np.full(cid_size[i], i) for i in range(cid_size.size)]).ravel()
+
+        self.infections = self.infections.reset_index()
+        self.infections['cohortid'] = new_cid
+
+    def OldNewSurvival(self, bootstrap=False):
         """plot proportion of haplotypes are old v new in population"""
         def cid_hid_cat_count(x):
             return x[['cohortid','hid']].drop_duplicates().shape[0]
+        def calculate_percentages(df):
+            chc_counts = df.\
+                groupby(['date_bin', 'val']).\
+                apply(lambda x : cid_hid_cat_count(x)).\
+                reset_index().\
+                rename(columns = {0 : 'counts'})
+            chc_counts['pc'] = chc_counts[['date_bin','counts']].\
+                groupby('date_bin').\
+                apply(lambda x : x / x.sum())
+            chc_counts['val'] = chc_counts.val.apply(lambda x : 'old' if x==1 else 'new')
+            return chc_counts
 
 
-        chc_counts = self.infections.\
-            groupby(['date_bin', 'val']).\
-            apply(lambda x : cid_hid_cat_count(x)).\
-            reset_index().\
-            rename(columns = {0 : 'counts'})
+        odf = calculate_percentages(self.original_infections)
 
-        piv = chc_counts.pivot(index='date', columns='val', values='counts')
-        date_sums = piv.sum(axis=1)
-        piv = piv.apply(lambda x : x / date_sums, axis=0).reset_index()
-        df = pd.melt(piv, id_vars='date', var_name='old_new', value_name='pc')
-        df['old_new'] = df.old_new.apply(lambda x : 'old' if x==1 else 'new')
+        if bootstrap:
+            for i in range(200):
+                print(i)
+                self.__bootstrap_cid__()
+                # t1 = time.time()
+                df = calculate_percentages(self.infections)
+                # print(time.time() - t1)
+                sns.lineplot(data=df, x='date_bin', y='pc', hue='val', alpha = 0.05)
 
-
-        sns.lineplot(data=df, x='date', y='pc', hue='old_new')
+        sns.lineplot(data=odf, x='date_bin', y='pc', hue='val')
         plt.show()
-    def CID_oldnewsurvival(self):
+    def CID_oldnewsurvival(self, bootstrap=False):
         """plot proportion of people with old v new v mixed"""
         def cid_cat_count(x, mix=True):
             return x['val'].unique().sum()
         def date_cat_count(x):
             return x.cohortid.drop_duplicates().shape[0]
 
-        mix_counts = self.infections.\
+        mix_counts = self.original_infections.\
             groupby(['cohortid', 'date_bin']).\
             apply(lambda x : cid_cat_count(x)).\
             reset_index().\
             rename(columns = {0 : 'c_val'})
-
         date_counts = mix_counts.groupby(['date_bin', 'c_val']).\
             apply(lambda x : date_cat_count(x)).\
             reset_index().\
             rename(columns = {0 : 'counts'})
-
         piv = date_counts.\
             pivot(index='date_bin', columns='c_val', values='counts').\
             rename(columns = {1 : 'old', 2 : 'new', 3 : 'mix'}).\
             fillna(0)
-
         piv['mix_old'] = piv.old + piv.mix
         piv['mix_new'] = piv.new + piv.mix
         date_sums = piv[['mix_old', 'mix_new']].sum(axis = 1)
@@ -245,12 +274,50 @@ class Survival:
             apply(lambda x : x/date_sums, axis = 0).\
             drop(columns = 'mix').\
             reset_index()
-
         df = pd.melt(piv, id_vars = 'date_bin')
         df['mixed'] = df.c_val.apply(lambda x : 'mix' in x)
         df['c_val'] = df.c_val.apply(lambda x : x.replace('mix_', ''))
+        odf = df.copy()
 
-        sns.lineplot(data=df, x='date_bin', y ='value', hue='c_val', style='mixed')
+        boots = []
+        if bootstrap:
+            for i in range(50):
+                # print(i)
+                self.__bootstrap_cid__()
+                mix_counts = self.infections.\
+                    groupby(['cohortid', 'date_bin']).\
+                    apply(lambda x : cid_cat_count(x)).\
+                    reset_index().\
+                    rename(columns = {0 : 'c_val'})
+                date_counts = mix_counts.groupby(['date_bin', 'c_val']).\
+                    apply(lambda x : date_cat_count(x)).\
+                    reset_index().\
+                    rename(columns = {0 : 'counts'})
+                piv = date_counts.\
+                    pivot(index='date_bin', columns='c_val', values='counts').\
+                    rename(columns = {1 : 'old', 2 : 'new', 3 : 'mix'}).\
+                    fillna(0)
+                if piv.shape[1] == 3:
+                    piv['mix_old'] = piv.old + piv.mix
+                    piv['mix_new'] = piv.new + piv.mix
+                    piv = piv.drop(columns = 'mix')
+                else:
+                    piv['mix_old'] = piv.old
+                    piv['mix_new'] = piv.new
+
+                date_sums = piv[['mix_old', 'mix_new']].sum(axis = 1)
+                piv = piv.\
+                    apply(lambda x : x/date_sums, axis = 0).\
+                    reset_index()
+                df = pd.melt(piv, id_vars = 'date_bin')
+                df['mixed'] = df.c_val.apply(lambda x : 'mix' in x)
+                # df['c_val'] = df.c_val.apply(lambda x : x.replace('mix_', ''))
+                # print(df)
+                boots.append(df)
+            boots = pd.concat(boots)
+            sns.lineplot(data=boots, x='date_bin', y ='value', hue='c_val', style='mixed')
+
+        sns.lineplot(data=odf, x='date_bin', y ='value', hue='c_val', style='mixed')
         plt.show()
 
 def main():
@@ -262,8 +329,10 @@ def main():
 
     # calculate Expected and Observed for skip vals in range
     s = Survival(sdo, meta)
-    # s.OldNewSurvival()
-    s.CID_oldnewsurvival()
+    s.OldNewSurvival(bootstrap=True)
+    # s.CID_oldnewsurvival(bootstrap=True)
+    # np.unique(s.original_infections[s.original_infections.date_bin == pd.to_datetime('2018-06-22 08:00:00')].val, return_counts=True)
+
 
 if __name__ == '__main__':
     main()
