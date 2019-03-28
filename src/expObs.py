@@ -4,6 +4,7 @@ import pandas as pd
 import numpy as np
 import seaborn as sns
 import sys
+import matplotlib.pyplot as plt
 
 sns.set(rc={'figure.figsize':(15, 12), 'lines.linewidth': 5})
 
@@ -95,22 +96,31 @@ class ExpObs:
 
         # iterate through timelines
         for i in range(self.skips, timeline.shape[1]):
+            if self.only_skips:
+                true_skip = timeline.iloc[:,i-self.skips + 1:i].values.sum() == 0
+            else:
+                true_skip=True
+            if true_skip:
+                # calculate observed
+                t_i = timeline.iloc[:,i].values
+                t_is = timeline.iloc[:,i-self.skips].values
+                obs[i - self.skips] = (t_i + t_is > 1).sum()
 
-            # calculate observed
-            t_i = timeline.iloc[:,i].values
-            t_is = timeline.iloc[:,i-self.skips].values
-            obs[i - self.skips] = (t_i + t_is > 1).sum()
+                # calculate expected
+                t_fs = (self.hapFreq[haps].values * t_is).sum()
+                t_f = (t_fs * t_i).sum()
+                exp[i - self.skips] = t_f
+            else:
+                obs[i - self.skips] = 0
+                exp[i - self.skips] = 0
 
-            # calculate expected
-            t_fs = (self.hapFreq[haps].values * t_is).sum()
-            t_f = (t_fs * t_i).sum()
-            exp[i - self.skips] = t_f
 
         # sum arrays and return
         return exp.sum(), obs.sum()
-    def fit(self, s = 0):
+    def fit(self, s = 0, only_skips=False):
         """run multiple skip evaluations for expected and observed values"""
         self.skips = s + 1
+        self.only_skips = only_skips
         eo = self.timelines.\
             groupby(level=0).\
             apply(lambda x : self.__exp_v_obs__(x))
@@ -137,12 +147,24 @@ def main():
     # calculate Expected and Observed for skip vals in range
     eo = ExpObs(sdo, meta)
     skip_vals = np.array([eo.fit(s=i) for i in range(9)])
+    only_skip_vals = np.array([eo.fit(s=i, only_skips=True) for i in range(9)])
+
+
+    def plot_eo(p):
+        g = sns.lineplot(data=p, x='skips', y = 'value', hue='variable', style='variable')
+        plt.xlabel('Skips')
+        plt.ylabel('Observed/Expected')
+        plt.title('Observed Haplotypes Over Expected')
+        return g
 
     # plot EO against number of skips
-    p = pd.DataFrame({'skips' : range(9), 'vals' : skip_vals })
-    sns.lineplot(data=p, x='skips', y = 'vals')
+    p = pd.DataFrame({'skips' : range(9), 'vals' : skip_vals , 'o_vals' : only_skip_vals})
+    p = p.melt(id_vars='skips')
 
+    g = plot_eo(p)
+    h = plot_eo(p[p.variable == 'vals'])
 
-
+    g.get_figure().savefig("../plots/obs_exp/only_skips_eo.png")
+    h.get_figure().savefig("../plots/obs_exp/eo.png")
 if __name__ == '__main__':
     main()
