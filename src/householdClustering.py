@@ -10,9 +10,9 @@ from itertools import combinations
 from scipy.spatial.distance import squareform, pdist
 from numpy.random import shuffle
 from geopy.distance import distance
+from tqdm import tqdm
 
 import sys, timeit
-
 
 sns.set(rc={'figure.figsize':(15, 12), 'lines.linewidth': 5})
 class SpatialClustering:
@@ -203,8 +203,8 @@ def pooled_v_average(sdo, meta):
     ra,b = sc.clusterHH(rolling=True)
 
     # run permutations test
-    permutations = np.array([sc.clusterHH(shuffle_hhid=True, population=False, rolling=True)[0] for _ in range(500)])
-    o_permutations = np.array([sc.clusterHH(shuffle_hhid=True, population=False)[0] for _ in range(500)])
+    permutations = np.array([sc.clusterHH(shuffle_hhid=True, population=False, rolling=True)[0] for _ in tqdm(range(500), desc='bootstrapping')])
+    # o_permutations = np.array([sc.clusterHH(shuffle_hhid=True, population=False)[0] for _ in range(500)])
 
     # confidence intervals on pooled method
     lower, higher = np.quantile(permutations, [0.025, 1 - 0.025]) / b
@@ -212,10 +212,12 @@ def pooled_v_average(sdo, meta):
     print("calculated H : {0}".format(ra/b))
 
     # plotting
-    sns.distplot(permutations/b, color='teal')
-    sns.distplot(o_permutations.mean(axis=1)/b, color='orange')
-    plt.axvline(a.mean()/b, color='orange')
-    plt.axvline(ra/b, color='teal')
+    g = sns.distplot(permutations/b, color='teal', label = 'Permuted Data')
+    # sns.distplot(o_permutations.mean(axis=1)/b, color='orange')
+    # plt.axvline(a.mean()/b, color='orange')
+    plt.axvline(ra/b, color='orange', ls='--', label='Original Dataset')
+    plt.legend()
+    g.get_figure().savefig("../plots/households/hhCluster.png")
     plt.show()
     plt.close()
 def time_analysis(sdo, meta):
@@ -249,20 +251,20 @@ def main():
     fn_gps = '../prism2/stata/PRISM_GPS.csv'
     sc = SpatialClustering(fn_sdo, fn_meta, fn_gps)
 
-    sc.iHH_plot(stepDist=True)
-    a = sc.square_gps_dist.copy()
-    a[a>2] = 0
-    G = nx.from_numpy_matrix(a)
-    nx.draw(G)
-    print(a[:,0])
+    # sc.iHH_plot(stepDist=True)
+    # a = sc.square_gps_dist.copy()
+    # a[a>2] = 0
+    # G = nx.from_numpy_matrix(a)
+    # nx.draw(G)
+    # print(a[:,0])
+    #
+    # sys.exit()
 
-    sys.exit()
-
-    # Time comparisons
-    time_analysis(fn_sdo, fn_meta)
-
-    # Show variance of calculated H by household size
-    hhSize_vs_calculatedH(fn_sdo, fn_meta)
+    # # Time comparisons
+    # time_analysis(fn_sdo, fn_meta)
+    #
+    # # Show variance of calculated H by household size
+    # hhSize_vs_calculatedH(fn_sdo, fn_meta)
 
     # Show difference in pooling vs mean method for permutations with data
     pooled_v_average(fn_sdo, fn_meta)
