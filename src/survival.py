@@ -4,8 +4,10 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
-import sys, warnings
-sns.set(rc={'figure.figsize':(15, 12), 'lines.linewidth': 5})
+import sys, warnings, time
+from tqdm import tqdm
+sns.set(rc={'figure.figsize':(15, 12), 'lines.linewidth': 2})
+sns.set_style('ticks')
 
 class Survival:
     pd.set_option('mode.chained_assignment', None) # remove settingwithcopywarning
@@ -19,7 +21,8 @@ class Survival:
         self.pr2 = pd.DataFrame()
         self.timelines = pd.DataFrame()
         self.cid_dates = pd.Series()
-        self.old_new = pd.DataFrame()
+        self.infections = pd.DataFrame()
+        self.mass_reindex = []
         self.date_bins = np.array([])
         self.column_bins = np.array([])
 
@@ -28,6 +31,8 @@ class Survival:
         self.__cid_dates__()
         self.__label_new_infections__()
         self.__bin_dates__()
+
+        self.original_infections = self.infections.copy()
     def __prepare_df__(self):
         """prepare dataframe for timeline creation"""
         self.__prepare_sdo__()
@@ -35,11 +40,17 @@ class Survival:
         self.pr2 = self.meta.merge(self.sdo, how='left')
     def __prepare_meta__(self):
         """prepare meta data for usage in timeline generation"""
-        self.meta = self.meta[['date', 'cohortid', 'qpcr']]
+        self.agecat_rename = {
+            '< 5 years'  : 1,
+            '5-15 years' : 2,
+            '16 years or older' : 3}
+        self.meta = self.meta[['date', 'cohortid', 'qpcr', 'agecat']]
         self.meta['date'] = self.meta['date'].astype('str')
         self.meta['cohortid'] = self.meta['cohortid'].astype('int')
+        self.meta['agecat'] = self.meta.agecat.apply(lambda x : self.agecat_rename[x])
         self.meta.sort_values(by='date', inplace=True)
         self.meta = self.meta[~self.meta.qpcr.isna()]
+        self.cid_count = self.meta['cohortid'].unique().size
     def __prepare_sdo__(self, controls=False):
         """prepare seekdeep output dataframe for internal usage"""
         # keep only patient samples and normalize dataframe
@@ -78,28 +89,25 @@ class Survival:
             apply(lambda x : x.date.values)
     def __bin_dates__(self):
         """bin columns (dates) into 12 evenly spaced windows based on first and last visit"""
-        dates = pd.to_datetime(self.old_new.columns.values)
-        self.date_bins = pd.date_range(dates[0], dates[-1], periods=13)
+        dates = pd.to_datetime(self.infections.date.unique())
+        self.date_bins = pd.date_range(dates.min(), dates.max(), periods=13)
 
-        counter = 0
-        idx = []
-        for d in dates:
-            if d <= self.date_bins[counter]:
-                idx.append(counter)
-            else:
-                counter += 1
-                idx.append(counter)
-        idx[0] += 1
+        dfs = []
+        for i in range(1, self.date_bins.size):
+            a = np.where((dates < self.date_bins[i]) & (dates >= self.date_bins[i-1]))[0]
+            p = pd.DataFrame({'date_bin' : self.date_bins[i], 'date' : dates[a]})
+            dfs.append(p)
 
-        self.column_bins = np.array(idx)
+        self.date_bins = pd.concat(dfs)
+        self.infections = self.infections.\
+            merge(self.date_bins)
     def __get_skips__(self, x):
         """return skips for timeline row"""
         # find all infection events
         i_event = x.values.nonzero()[1]
 
         # find distances between infection events
-        vals = np.array([
-            i_event[i] - i_event[i-1] for i in range(1, i_event.size)])
+        vals = np.diff(i_event)
 
         # subtract one from distances to reflect true skip size
         return vals - 1
@@ -108,7 +116,7 @@ class Survival:
         i_event = x.values.nonzero()[1]
         if np.all(skips <= self.allowedSkips):
             # one continuous infection
-            return i_event
+            return np.array([i_event, np.nan])
         else:
             # reinfection occurs under allowed skips
             return np.split(i_event, np.where(skips > self.allowedSkips)[0] + 1)
@@ -136,92 +144,192 @@ class Survival:
         return timeline
         """
         cid, hid = x.name
-        # if cid != 3839:
-        #     return
+
         timeline = x.loc[:,self.cid_dates[cid]]
 
         skips = self.__get_skips__(timeline)
         ifx = self.__infection_duration__(timeline, skips)
 
-        timeline[timeline == 0] = np.nan
+        return ifx
+    def __mark_timeline__(self, x):
+        cid, hid, i = x.name
+        vals = x.values[0][0]
+        ifx = np.arange(vals.min(), vals.max() + 1)
+        dates = self.cid_dates[cid][ifx]
+        if pd.to_datetime(dates[0]) <= self.burnin:
+            i_state = 1
+        else:
+            i_state = 2
 
-        # single infection labeller
-        if type(ifx) == np.ndarray:
-            t = self.__timeline_marker__(timeline, ifx)
-
-        # multiple infection labeller
-        if type(ifx) == list:
-            [self.__timeline_marker__(timeline, i) for i in ifx]
-
-        return timeline
+        self.mass_reindex.append([cid, hid, i_state, dates])
     def __label_new_infections__(self):
         """create old and new infection timelines"""
-        self.old_new = self.timelines.\
+        # find infection times
+        self.infections = self.timelines.\
             groupby(level=[0,1], sort=False).\
-            apply(lambda x : self.__type_labeller__(x))
-        self.old_new = self.old_new.fillna(0)
-    def OldNewSurvival(self):
+            apply(lambda x : self.__type_labeller__(x)).\
+            apply(pd.Series).\
+            stack().\
+            to_frame('ifx')
+        self.infections.index.names = ['cohortid', 'hid', 'ifx_num']
+
+        # split multiple infections to separate observations
+        self.infections.groupby(level=[0,1,2], sort=False).\
+            apply(lambda x : self.__mark_timeline__(x))
+
+        # split infection dates to separate observations
+        self.infections = pd.DataFrame(self.mass_reindex)
+        self.infections.columns = ['cohortid', 'hid', 'val', 'date']
+        wide_form = self.infections.date.\
+            apply(pd.Series).\
+            merge(self.infections.drop(columns='date'), left_index=True, right_index=True)
+
+        self.infections = pd.melt(
+                wide_form,
+                id_vars = ['cohortid', 'hid', 'val']).\
+            drop(columns = 'variable').\
+            fillna('nope')
+
+        # drop NAs from melted dataframe
+        self.infections = self.infections[self.infections.value != 'nope']
+
+        # rename columns
+        self.infections.columns = ['cohortid', 'hid', 'val', 'date']
+
+        # convert date column to datetime
+        self.infections.date = pd.to_datetime(self.infections.date)
+    def __bootstrap_cid__(self):
+        """randomly sample with replacement on CID"""
+        c = self.original_infections.cohortid.unique().copy()
+        rc = np.random.choice(c, c.size)
+        self.infections = self.original_infections.copy()
+
+        # calculate index size for each cohortid in random choice
+        cid_size = np.array([np.where(self.infections.cohortid == i)[0].size for i in rc])
+
+        # set index to cohortid
+        self.infections = self.infections.set_index('cohortid')
+
+        # generate bootstrap
+        self.infections = self.infections.loc[rc]
+
+        # create array of new cid_id with expected length
+        new_cid = np.concatenate([np.full(cid_size[i], i) for i in range(cid_size.size)]).ravel()
+
+        self.infections = self.infections.reset_index()
+        self.infections['cohortid'] = new_cid
+    def OldNewSurvival(self, bootstrap=False):
         """plot proportion of haplotypes are old v new in population"""
-        tw = range(1, self.date_bins.size)
+        def cid_hid_cat_count(x):
+            return x[['cohortid','hid']].drop_duplicates().shape[0]
+        def calculate_percentages(df):
+            chc_counts = df.\
+                groupby(['date_bin', 'val']).\
+                apply(lambda x : cid_hid_cat_count(x)).\
+                reset_index().\
+                rename(columns = {0 : 'counts'})
+            chc_counts['pc'] = chc_counts[['date_bin','counts']].\
+                groupby('date_bin').\
+                apply(lambda x : x / x.sum())
+            chc_counts['val'] = chc_counts.val.apply(lambda x : 'old' if x==1 else 'new')
+            return chc_counts
 
-        windows = []
-        # iterate through date windows
-        for i in tw:
-            t = self.old_new.iloc[:,np.where(self.column_bins == i)[0]]
-            row_vals = t.apply(lambda x : np.unique(x).sum(), axis = 1)
-            vals, count = np.unique(row_vals.values, return_counts=True)
-            p = pd.DataFrame({
-                'window' : i,
-                'type' : vals,
-                'counts' : count
-            })
-            windows.append(p)
 
-        windows = pd.concat(windows)
-        self.plot_windows(windows)
-    def CID_oldnewsurvival(self):
+        odf = calculate_percentages(self.original_infections)
+
+        if bootstrap:
+            for i in tqdm(range(300), desc = 'bootstrapping'):
+                self.__bootstrap_cid__()
+                df = calculate_percentages(self.infections)
+                sns.lineplot(data=df, x='date_bin', y='pc', hue='val', alpha = 0.05, legend=False)
+
+        g = sns.lineplot(data=odf, x='date_bin', y='pc', hue='val')
+        plt.xlabel('Date')
+        plt.ylabel('Percentage')
+        plt.title('Fraction of Old Clones In Infected Population')
+        g.get_figure().savefig("../plots/survival/hid_survival.png")
+        plt.show()
+        plt.close()
+    def CID_oldnewsurvival(self, bootstrap=False):
         """plot proportion of people with old v new v mixed"""
-        tw = range(1, self.date_bins.size)
+        def cid_cat_count(x, mix=True):
+            return x['val'].unique().sum()
+        def date_cat_count(x):
+            return x.cohortid.drop_duplicates().shape[0]
+        def calculate_percentages(df):
+            mix_counts = df.\
+                groupby(['cohortid', 'date_bin']).\
+                apply(lambda x : cid_cat_count(x)).\
+                reset_index().\
+                rename(columns = {0 : 'c_val'})
+            date_counts = mix_counts.groupby(['date_bin', 'c_val']).\
+                apply(lambda x : date_cat_count(x)).\
+                reset_index().\
+                rename(columns = {0 : 'counts'})
+            piv = date_counts.\
+                pivot(index='date_bin', columns='c_val', values='counts').\
+                rename(columns = {1 : 'old', 2 : 'new', 3 : 'mix'}).\
+                fillna(0)
+            if piv.shape[1] == 3:
+                piv['mix_old'] = piv.old + piv.mix
+                piv['mix_new'] = piv.new + piv.mix
+                piv = piv.drop(columns = 'mix')
+            else:
+                piv['mix_old'] = piv.old
+                piv['mix_new'] = piv.new
 
-        windows = []
-        # iterate through date windows
-        for i in tw:
-            t = self.old_new.iloc[:,np.where(self.column_bins == i)[0]]
-            cid_vals = t.groupby(level=0).apply(lambda x : np.unique(x).sum())
+            date_sums = piv[['mix_old', 'mix_new']].sum(axis = 1)
+            piv = piv.\
+                apply(lambda x : x / self.cid_count, axis = 0).\
+                reset_index()
 
-            vals, count = np.unique(cid_vals.values, return_counts=True)
+            df = pd.melt(piv, id_vars = 'date_bin')
+            df['mixed'] = df.c_val.apply(lambda x : 'mix' in x)
 
-            p = pd.DataFrame({
-                'window' : i,
-                'type' : vals,
-                'counts' : count
-            })
-            windows.append(p)
+            return df
 
-        windows = pd.concat(windows)
-        self.plot_windows(windows)
-    def plot_windows(self, windows):
-        date_bins = pd.DataFrame({'t' : range(1, self.date_bins.size), 'bins' : self.date_bins[:-1]})
+        odf = calculate_percentages(self.original_infections)
+        if bootstrap :
+            for i in tqdm(range(300), desc = 'bootstrapping'):
+                self.__bootstrap_cid__()
+                df = calculate_percentages(self.infections)
+                sns.lineplot(data=df, x='date_bin', y ='value', hue='c_val', style='mixed', legend=False, alpha=0.05)
 
-        # remove zeros
-        w = pd.pivot(windows, index='window', columns = 'type', values='counts').drop(columns=0)
+        g = sns.lineplot(data=odf, x='date_bin', y ='value', hue='c_val', style='mixed')
+        plt.xlabel('Date')
+        plt.ylabel('Percentage')
+        plt.title('Fraction of New and Old Clones by Individual')
+        g.get_figure().savefig("../plots/survival/CID_survival.png")
+        plt.show()
+        plt.close()
+    def OldWaning(self, bootstrap=False):
+        """calculate fraction of old clones remaining across each month past the burnin"""
+        def monthly_kept(x):
+            return x[x.val == 1][['cohortid', 'hid']].drop_duplicates().shape[0]
+        def waning(df):
+            monthly_counts = df.groupby('date_bin').apply(lambda x : monthly_kept(x))
+            oc_idx = np.where(
+                (monthly_counts.index.year == self.burnin.year) &
+                (monthly_counts.index.month == self.burnin.month))[0]
+            oc = monthly_counts[oc_idx].values
+            monthly_counts = monthly_counts/oc
+            return monthly_counts[monthly_counts.index > self.burnin]
 
-        # calculate window sums
-        sums = w.sum(axis = 1)
 
-        # normalize windows to sum
-        # convert to long
-        # get actual window dates
-        fracs = w.apply(lambda x : x/sums, axis =0).\
-            reset_index().\
-            melt(id_vars='window').\
-            merge(date_bins, left_on = 'window', right_on='t', how = 'left')
-        # convert flaot to int for hue
-        fracs.type = fracs.type.astype('int')
+        omc = waning(self.original_infections)
+        if bootstrap:
+            for i in tqdm(range(500), desc='bootstrapping'):
+                self.__bootstrap_cid__()
+                mc = waning(self.infections)
+                sns.lineplot(x = mc.index, y = mc.values, legend=False, alpha = 0.01, color='black')
 
-        # plot lines
-        sns.lineplot(data=fracs, x = 'bins', y = 'value', style='type', hue='type')
-
+        g = sns.lineplot(x = omc.index, y = omc.values)
+        plt.xlabel('Date')
+        plt.title('Percentage')
+        plt.title('Fraction of Old Clones Remaining')
+        g.get_figure().savefig("../plots/survival/oldClones.png")
+        plt.show()
+        plt.close()
 
 def main():
     sdo_fn = "../prism2/full_prism2/filtered_5pc_10r.tab"
@@ -232,8 +340,9 @@ def main():
 
     # calculate Expected and Observed for skip vals in range
     s = Survival(sdo, meta)
-    s.OldNewSurvival()
-    s.CID_oldnewsurvival()
+    s.OldNewSurvival(bootstrap=True)
+    s.CID_oldnewsurvival(bootstrap=True)
+    s.OldWaning(bootstrap=True)
 
 if __name__ == '__main__':
     main()
