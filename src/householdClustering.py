@@ -3,35 +3,47 @@
 import numpy as np
 import pandas as pd
 import seaborn as sns
+import networkx as nx
 import matplotlib.pyplot as plt
 
 from itertools import combinations
 from scipy.spatial.distance import squareform, pdist
 from numpy.random import shuffle
+from geopy.distance import distance
+from tqdm import tqdm
 
 import sys, timeit
 
-
 sns.set(rc={'figure.figsize':(15, 12), 'lines.linewidth': 5})
 class SpatialClustering:
-    def __init__(self, sdo, meta):
+    def __init__(self, sdo, meta, gps=False):
         self.sdo_fn = sdo
         self.meta_fn = meta
+        self.gps_fn = gps
 
         self.sdo = pd.DataFrame()
         self.meta = pd.DataFrame()
         self.data = pd.DataFrame()
+        self.gps = pd.DataFrame()
 
         self.cHap = pd.DataFrame()
         self.cHapMat = pd.DataFrame()
         self.hhIndex = pd.Series()
         self.pw_dist = pd.DataFrame()
+        self.gps_dist = pd.DataFrame()
+        self.square_gps_dist = pd.DataFrame()
 
         self.__load_sdo__()
         self.__load_meta__()
         self.__merge_data__()
         self.__cHap_matrix__()
         self.__pivot_data__()
+
+        if self.gps_fn:
+            self.__load_gps__()
+            self.__gps_pwdist__()
+
+
     def __load_sdo__(self):
         """load in seekdeep output data"""
         self.sdo = pd.read_csv(self.sdo_fn, sep="\t")[['s_Sample', 'h_popUID', 'c_AveragedFrac']]
@@ -51,6 +63,15 @@ class SpatialClustering:
     def __load_meta__(self):
         """load in cohort meta data"""
         self.meta = pd.read_stata(self.meta_fn)[['cohortid', 'hhid']].drop_duplicates()
+    def __load_gps__(self):
+        """load gps as dataframe"""
+        self.gps = pd.read_csv(self.gps_fn, sep="\t")
+        self.gps = self.gps[self.gps.hhid.isin(self.data.hhid.unique())]
+        self.gps['coord'] = self.gps[['lat', 'lng']].apply(tuple, axis=1)
+    def __gps_pwdist__(self):
+        """pairwise distances of coordinates found in data as squareform and array"""
+        self.gps_dist = pdist(self.gps, lambda x,y : distance(x[-1], y[-1]).km)
+        self.square_gps_dist = np.tril(squareform(self.gps_dist))
     def __merge_data__(self):
         """merge cohort meta data with seekdeep output"""
         self.data = self.sdo.merge(
@@ -135,6 +156,30 @@ class SpatialClustering:
             params.append(p)
 
         return params
+    def iHH_counts(self, d):
+        """
+        given a distance in km (d) return number of comparisons
+        that fall within distance for each hh
+        """
+        a = (self.square_gps_dist <= d) & (self.square_gps_dist > 0)
+        b = a.sum(axis=0)
+        return b
+    def iHH_plot(self, stepDist=False, heatMap=False, boxPlot=False):
+        if stepDist:
+            sns.distplot(self.gps_dist, kde=False, bins=30)
+            plt.xlabel("household distances (km)")
+            plt.ylabel("number of pairs")
+        elif heatMap:
+            sns.heatmap(1 - self.square_gps_dist)
+        elif boxPlot:
+            lin = np.arange(15) # x axis (distance threshold)
+            counts = np.array([self.iHH_counts(i) for i in lin])
+            counts = pd.DataFrame(counts)
+            counts['lin'] = lin
+            melted_counts = pd.melt(a, id_vars='lin', var_name='hh', value_name='comparisons')
+            sns.boxplot(x='lin', y='comparisons', data=melted_counts)
+        plt.show()
+
 
 def hhSize_vs_calculatedH(sdo, meta):
     """calculatedH dependence on household size for nonpooled calculation"""
@@ -158,8 +203,8 @@ def pooled_v_average(sdo, meta):
     ra,b = sc.clusterHH(rolling=True)
 
     # run permutations test
-    permutations = np.array([sc.clusterHH(shuffle_hhid=True, population=False, rolling=True)[0] for _ in range(500)])
-    o_permutations = np.array([sc.clusterHH(shuffle_hhid=True, population=False)[0] for _ in range(500)])
+    permutations = np.array([sc.clusterHH(shuffle_hhid=True, population=False, rolling=True)[0] for _ in tqdm(range(500), desc='bootstrapping')])
+    # o_permutations = np.array([sc.clusterHH(shuffle_hhid=True, population=False)[0] for _ in range(500)])
 
     # confidence intervals on pooled method
     lower, higher = np.quantile(permutations, [0.025, 1 - 0.025]) / b
@@ -167,10 +212,12 @@ def pooled_v_average(sdo, meta):
     print("calculated H : {0}".format(ra/b))
 
     # plotting
-    sns.distplot(permutations/b, color='teal')
-    sns.distplot(o_permutations.mean(axis=1)/b, color='orange')
-    plt.axvline(a.mean()/b, color='orange')
-    plt.axvline(ra/b, color='teal')
+    g = sns.distplot(permutations/b, color='teal', label = 'Permuted Data')
+    # sns.distplot(o_permutations.mean(axis=1)/b, color='orange')
+    # plt.axvline(a.mean()/b, color='orange')
+    plt.axvline(ra/b, color='orange', ls='--', label='Original Dataset')
+    plt.legend()
+    g.get_figure().savefig("../plots/households/hhCluster.png")
     plt.show()
     plt.close()
 def time_analysis(sdo, meta):
@@ -195,16 +242,29 @@ def time_analysis(sdo, meta):
     sns.distplot(np.array(t1))
     sns.distplot(np.array(t2))
     plt.show()
+
+
+
 def main():
     fn_sdo = '../prism2/full_prism2/filtered_5pc_10r.tab'
     fn_meta = '../prism2/stata/allVisits.dta'
     fn_gps = '../prism2/stata/PRISM_GPS.csv'
+    sc = SpatialClustering(fn_sdo, fn_meta, fn_gps)
 
-    # Time comparisons
-    time_analysis(fn_sdo, fn_meta)
+    # sc.iHH_plot(stepDist=True)
+    # a = sc.square_gps_dist.copy()
+    # a[a>2] = 0
+    # G = nx.from_numpy_matrix(a)
+    # nx.draw(G)
+    # print(a[:,0])
+    #
+    # sys.exit()
 
-    # Show variance of calculated H by household size
-    hhSize_vs_calculatedH(fn_sdo, fn_meta)
+    # # Time comparisons
+    # time_analysis(fn_sdo, fn_meta)
+    #
+    # # Show variance of calculated H by household size
+    # hhSize_vs_calculatedH(fn_sdo, fn_meta)
 
     # Show difference in pooling vs mean method for permutations with data
     pooled_v_average(fn_sdo, fn_meta)
