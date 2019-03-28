@@ -603,7 +603,7 @@ class SeekDeepUtils:
         """prepare meta data for usage in timeline generation"""
         self.meta = meta[['date', 'cohortid', 'qpcr', 'agecat']]
         self.meta['date'] = pd.to_datetime(self.meta['date'])
-        self.meta['cohortid'] = self.meta['cohortid'].astype('str')
+        self.meta['cohortid'] = self.meta['cohortid'].astype('int')
         self.meta.sort_values(by='date', inplace=True)
         self.meta = self.meta[~self.meta.qpcr.isna()]
         return self.meta
@@ -622,6 +622,7 @@ class SeekDeepUtils:
             axis = 1, result_type = 'expand')
 
         self.sdo.date = pd.to_datetime(self.sdo.date)
+        self.sdo.cohortid = self.sdo.cohortid.astype('int')
 
         return self.sdo
     def __prepare_durations__(self, duration_list):
@@ -659,6 +660,10 @@ class SeekDeepUtils:
         skip_dataframe = []
 
         for cid, timeline in timelines.items():
+
+            # case where cid excluded from meta
+            if timeline.empty:
+                continue
 
             # find infection events and skips between them
             timeline[['i_events', 'skips']] = timeline.apply(
