@@ -216,7 +216,6 @@ class Survival:
 
         self.infections = self.infections.reset_index()
         self.infections['cohortid'] = new_cid
-
     def OldNewSurvival(self, bootstrap=False):
         """plot proportion of haplotypes are old v new in population"""
         def cid_hid_cat_count(x):
@@ -238,12 +237,9 @@ class Survival:
 
         if bootstrap:
             for i in range(200):
-                print(i)
                 self.__bootstrap_cid__()
-                # t1 = time.time()
                 df = calculate_percentages(self.infections)
-                # print(time.time() - t1)
-                sns.lineplot(data=df, x='date_bin', y='pc', hue='val', alpha = 0.05)
+                sns.lineplot(data=df, x='date_bin', y='pc', hue='val', alpha = 0.05, legend=False)
 
         sns.lineplot(data=odf, x='date_bin', y='pc', hue='val')
         plt.show()
@@ -253,72 +249,47 @@ class Survival:
             return x['val'].unique().sum()
         def date_cat_count(x):
             return x.cohortid.drop_duplicates().shape[0]
+        def calculate_percentages(df):
+            mix_counts = df.\
+                groupby(['cohortid', 'date_bin']).\
+                apply(lambda x : cid_cat_count(x)).\
+                reset_index().\
+                rename(columns = {0 : 'c_val'})
+            date_counts = mix_counts.groupby(['date_bin', 'c_val']).\
+                apply(lambda x : date_cat_count(x)).\
+                reset_index().\
+                rename(columns = {0 : 'counts'})
+            piv = date_counts.\
+                pivot(index='date_bin', columns='c_val', values='counts').\
+                rename(columns = {1 : 'old', 2 : 'new', 3 : 'mix'}).\
+                fillna(0)
+            if piv.shape[1] == 3:
+                piv['mix_old'] = piv.old + piv.mix
+                piv['mix_new'] = piv.new + piv.mix
+                piv = piv.drop(columns = 'mix')
+            else:
+                piv['mix_old'] = piv.old
+                piv['mix_new'] = piv.new
 
-        mix_counts = self.original_infections.\
-            groupby(['cohortid', 'date_bin']).\
-            apply(lambda x : cid_cat_count(x)).\
-            reset_index().\
-            rename(columns = {0 : 'c_val'})
-        date_counts = mix_counts.groupby(['date_bin', 'c_val']).\
-            apply(lambda x : date_cat_count(x)).\
-            reset_index().\
-            rename(columns = {0 : 'counts'})
-        piv = date_counts.\
-            pivot(index='date_bin', columns='c_val', values='counts').\
-            rename(columns = {1 : 'old', 2 : 'new', 3 : 'mix'}).\
-            fillna(0)
-        piv['mix_old'] = piv.old + piv.mix
-        piv['mix_new'] = piv.new + piv.mix
-        date_sums = piv[['mix_old', 'mix_new']].sum(axis = 1)
-        piv = piv.\
-            apply(lambda x : x/date_sums, axis = 0).\
-            drop(columns = 'mix').\
-            reset_index()
-        df = pd.melt(piv, id_vars = 'date_bin')
-        df['mixed'] = df.c_val.apply(lambda x : 'mix' in x)
-        df['c_val'] = df.c_val.apply(lambda x : x.replace('mix_', ''))
-        odf = df.copy()
+            date_sums = piv[['mix_old', 'mix_new']].sum(axis = 1)
+            piv = piv.\
+                apply(lambda x : x / 430, axis = 0).\
+                reset_index()
 
-        boots = []
-        if bootstrap:
-            for i in range(50):
-                # print(i)
+            df = pd.melt(piv, id_vars = 'date_bin')
+            df['mixed'] = df.c_val.apply(lambda x : 'mix' in x)
+
+            return df
+
+        odf = calculate_percentages(self.original_infections)
+        if bootstrap :
+            for i in range(200):
                 self.__bootstrap_cid__()
-                mix_counts = self.infections.\
-                    groupby(['cohortid', 'date_bin']).\
-                    apply(lambda x : cid_cat_count(x)).\
-                    reset_index().\
-                    rename(columns = {0 : 'c_val'})
-                date_counts = mix_counts.groupby(['date_bin', 'c_val']).\
-                    apply(lambda x : date_cat_count(x)).\
-                    reset_index().\
-                    rename(columns = {0 : 'counts'})
-                piv = date_counts.\
-                    pivot(index='date_bin', columns='c_val', values='counts').\
-                    rename(columns = {1 : 'old', 2 : 'new', 3 : 'mix'}).\
-                    fillna(0)
-                if piv.shape[1] == 3:
-                    piv['mix_old'] = piv.old + piv.mix
-                    piv['mix_new'] = piv.new + piv.mix
-                    piv = piv.drop(columns = 'mix')
-                else:
-                    piv['mix_old'] = piv.old
-                    piv['mix_new'] = piv.new
-
-                date_sums = piv[['mix_old', 'mix_new']].sum(axis = 1)
-                piv = piv.\
-                    apply(lambda x : x/date_sums, axis = 0).\
-                    reset_index()
-                df = pd.melt(piv, id_vars = 'date_bin')
-                df['mixed'] = df.c_val.apply(lambda x : 'mix' in x)
-                # df['c_val'] = df.c_val.apply(lambda x : x.replace('mix_', ''))
-                # print(df)
-                boots.append(df)
-            boots = pd.concat(boots)
-            sns.lineplot(data=boots, x='date_bin', y ='value', hue='c_val', style='mixed')
-
+                df = calculate_percentages(self.infections)
+                sns.lineplot(data=df, x='date_bin', y ='value', hue='c_val', style='mixed', legend=False, alpha=0.05)
         sns.lineplot(data=odf, x='date_bin', y ='value', hue='c_val', style='mixed')
         plt.show()
+
 
 def main():
     sdo_fn = "../prism2/full_prism2/filtered_5pc_10r.tab"
@@ -329,8 +300,12 @@ def main():
 
     # calculate Expected and Observed for skip vals in range
     s = Survival(sdo, meta)
-    s.OldNewSurvival(bootstrap=True)
-    # s.CID_oldnewsurvival(bootstrap=True)
+    # s.OldNewSurvival(bootstrap=True)
+    s.CID_oldnewsurvival(bootstrap=True)
+
+    s.original_infections.date_bin
+    s.original_infections[s.original_infections.date_bin == pd.to_datetime('2018-06-22 08:00:00')]
+
     # np.unique(s.original_infections[s.original_infections.date_bin == pd.to_datetime('2018-06-22 08:00:00')].val, return_counts=True)
 
 
