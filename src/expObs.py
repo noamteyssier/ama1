@@ -4,6 +4,7 @@ import pandas as pd
 import numpy as np
 import seaborn as sns
 import sys
+import matplotlib.pyplot as plt
 
 sns.set(rc={'figure.figsize':(15, 12), 'lines.linewidth': 5})
 
@@ -149,12 +150,21 @@ def main():
     only_skip_vals = np.array([eo.fit(s=i, only_skips=True) for i in range(9)])
 
 
+    def plot_eo(p):
+        g = sns.lineplot(data=p, x='skips', y = 'value', hue='variable', style='variable')
+        plt.xlabel('Skips')
+        plt.ylabel('Observed/Expected')
+        plt.title('Observed Haplotypes Over Expected')
+        return g
+
     # plot EO against number of skips
     p = pd.DataFrame({'skips' : range(9), 'vals' : skip_vals , 'o_vals' : only_skip_vals})
     p = p.melt(id_vars='skips')
-    sns.lineplot(data=p, x='skips', y = 'value', hue='variable', style='variable')
 
+    g = plot_eo(p)
+    h = plot_eo(p[p.variable == 'vals'])
 
-
+    g.get_figure().savefig("../plots/obs_exp/only_skips_eo.png")
+    h.get_figure().savefig("../plots/obs_exp/eo.png")
 if __name__ == '__main__':
     main()
