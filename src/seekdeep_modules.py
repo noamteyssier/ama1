@@ -353,18 +353,18 @@ class SeekDeepUtils:
 
         # minimum threshold to use when calculating skips
         self.qpcr_threshold = qpcr_threshold
-
     def __prepare_pr2__(self):
-        def qpcr_filter(x):
-            print(x)
-            sys.exit()
-
         self.__prepare_sdo__()
         self.__prepare_meta__()
-        self.pr2 = self.meta.merge(self.sdo, how='left')
-        self.pr2.apply(lambda x : qpcr_filter(x), axis=1)
 
-        print(self.pr2)
+        # filter qpcr dates
+        self.meta = self.meta[(self.meta.qpcr == 0) | (self.meta.qpcr >= 0.1)]
+
+        # merge meta and sdo
+        self.pr2 = self.meta.merge(self.sdo, how='left')
+
+        # filter all positive qpcr dates with failed sequencing
+        self.pr2 = self.pr2[~((self.pr2.qpcr > 0) & np.isnan(self.pr2.c_AveragedFrac))]
     def __prepare_meta__(self):
         """prepare meta data for usage in timeline generation"""
         self.meta = self.meta[['date', 'cohortid', 'qpcr', 'agecat']]
