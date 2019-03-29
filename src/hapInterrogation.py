@@ -58,7 +58,11 @@ def main():
     meta = pd.read_stata(args.meta)
 
     # initialize modules
-    s = SeekDeepUtils(date_qpcr=args.qpcr_flag, qpcr_threshold=args.qpcr_threshold)
+    s = SeekDeepUtils(
+        sdo = sdo,
+        meta = meta,
+        date_qpcr=args.qpcr_flag,
+        qpcr_threshold=args.qpcr_threshold)
 
     # calculate allele frequency
     if args.allele_frequency:

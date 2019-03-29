@@ -341,8 +341,12 @@ class HaplotypeUtils:
         return self.filtered
 class SeekDeepUtils:
     """class for various utilities related to SeekDeep output"""
-    def __init__(self, date_qpcr=True, qpcr_threshold = 0):
-        self.sdo = pd.DataFrame()
+    pd.set_option('mode.chained_assignment', None) # remove settingwithcopywarning
+    def __init__(self, sdo, meta, date_qpcr=True, qpcr_threshold = 0):
+        self.sdo = sdo
+        self.meta = meta
+        self.__prepare_pr2__()
+        sys.exit()
 
         # boolean controlling whether to use qpcr fraction or not
         self.date_qpcr = date_qpcr
@@ -350,7 +354,124 @@ class SeekDeepUtils:
         # minimum threshold to use when calculating skips
         self.qpcr_threshold = qpcr_threshold
 
-        pd.set_option('mode.chained_assignment', None) # remove settingwithcopywarning
+    def __prepare_pr2__(self):
+        def qpcr_filter(x):
+            print(x)
+            sys.exit()
+
+        self.__prepare_sdo__()
+        self.__prepare_meta__()
+        self.pr2 = self.meta.merge(self.sdo, how='left')
+        self.pr2.apply(lambda x : qpcr_filter(x), axis=1)
+
+        print(self.pr2)
+    def __prepare_meta__(self):
+        """prepare meta data for usage in timeline generation"""
+        self.meta = self.meta[['date', 'cohortid', 'qpcr', 'agecat']]
+        self.meta['date'] = pd.to_datetime(self.meta['date'])
+        self.meta['cohortid'] = self.meta['cohortid'].astype('int')
+        self.meta.sort_values(by='date', inplace=True)
+        self.meta = self.meta[~self.meta.qpcr.isna()]
+        return self.meta
+    def __prepare_sdo__(self, controls=False):
+        """prepare seekdeep output dataframe for internal usage"""
+        # keep only patient samples and normalize dataframe
+        if controls == False:
+            self.sdo = self.sdo[~self.sdo.s_Sample.str.contains('ctrl|neg')]
+            self.sdo = self.fix_filtered_SDO(self.sdo)
+
+        # split cid and date
+        self.sdo[['date', 'cohortid']] = self.sdo.apply(
+            lambda x : self.__split_cid_date__(x),
+            axis = 1, result_type = 'expand')
+
+        self.sdo.date = pd.to_datetime(self.sdo.date)
+        self.sdo.cohortid = self.sdo.cohortid.astype('int')
+
+        return self.sdo
+    def __prepare_durations__(self, duration_list):
+        """melt multiple duration events in dataframe to separate rows and return ordered dataframe"""
+        i_durations = pd.concat(duration_list, ignore_index=True)
+
+        # expand listed durations to separate rows
+        s = i_durations.apply(
+        lambda x: pd.Series(x['durations']),axis=1).\
+        stack().\
+        reset_index(level=1, drop=True)
+        s.name = 'duration'
+
+        # join back on original dataframe
+        i_durations = i_durations.\
+        drop('durations', axis=1).\
+        join(s)
+
+        # sequentially label infection durations
+        i_durations['i_event'] = i_durations.\
+        groupby(['cohortid', 'h_popUID']).\
+        cumcount()
+
+        # convert duration to integer of days
+        i_durations['duration'] = i_durations.\
+        duration.dt.days
+
+        self.durations = i_durations[['cohortid', 'h_popUID', 'i_event', 'duration']]
+        # return ordered dataframe
+        return self.durations
+    def __prepare_skips__(self):
+        """calculates number of skips for each cid~h_popUID at each date"""
+        timelines = self.__all_timelines__()
+
+        skip_dataframe = []
+
+        for cid, timeline in timelines.items():
+
+            # case where cid excluded from meta
+            if timeline.empty:
+                continue
+
+                # find infection events and skips between them
+                timeline[['i_events', 'skips']] = timeline.apply(
+                lambda x : self.__calculate_skips__(x, diagnose=True),
+                axis = 1, result_type = 'expand')
+
+                # for haplotype row create a dataframe of skips and dates
+                for _, row in timeline.iterrows():
+                    skip_dataframe.append(self.__arrange_skips__(row, cid))
+
+                    self.skip_df = pd.concat(skip_dataframe)
+
+                    self.skip_df.date = pd.to_datetime(self.skip_df.date)
+
+                    return self.skip_df
+    def __prepare_new_infections__(self, cids, hids, new_ifx):
+        """prepare new infections dataframe for downstream usage"""
+
+        # create dataframe from lists
+        self.new_infections = pd.DataFrame({
+        'cohortid' : cids,
+        'h_popUID' : hids,
+        'n_infection' : new_ifx})
+
+        # filter haplotypes without new infections
+        self.new_infections = self.new_infections[
+        self.new_infections.n_infection > 0]
+
+        # sum total new infections by cohortid
+        new_infection_totals = self.new_infections.\
+        groupby('cohortid').\
+        agg({'n_infection' : 'sum'}).\
+        rename(columns = {'n_infection' : 'total_n_infection'}).\
+        reset_index()
+
+        # merge back into original dataframe
+        self.new_infections = self.new_infections.merge(
+        new_infection_totals, how = 'left')
+
+        # arrange columns for beauty
+        self.new_infections = self.new_infections[
+        ['cohortid', 'total_n_infection', 'h_popUID', 'n_infection']]
+
+        return self.new_infections
     def __recalculate_population_fractions__(self):
         self.sdo = self.sdo.\
             groupby('s_Sample').\
@@ -599,115 +720,6 @@ class SeekDeepUtils:
         a = row.s_Sample.split('-')
         date, cid = '-'.join(a[:3]), a[-1]
         return [date, cid]
-    def __prepare_meta__(self, meta):
-        """prepare meta data for usage in timeline generation"""
-        self.meta = meta[['date', 'cohortid', 'qpcr', 'agecat']]
-        self.meta['date'] = pd.to_datetime(self.meta['date'])
-        self.meta['cohortid'] = self.meta['cohortid'].astype('int')
-        self.meta.sort_values(by='date', inplace=True)
-        self.meta = self.meta[~self.meta.qpcr.isna()]
-        return self.meta
-    def __prepare_sdo__(self, sdo, controls=False):
-        """prepare seekdeep output dataframe for internal usage"""
-        # keep only patient samples and normalize dataframe
-        if controls == False:
-            self.sdo = sdo[~sdo.s_Sample.str.contains('ctrl|neg')]
-            self.sdo = self.fix_filtered_SDO(self.sdo)
-        else:
-            self.sdo = sdo
-
-        # split cid and date
-        self.sdo[['date', 'cohortid']] = self.sdo.apply(
-            lambda x : self.__split_cid_date__(x),
-            axis = 1, result_type = 'expand')
-
-        self.sdo.date = pd.to_datetime(self.sdo.date)
-        self.sdo.cohortid = self.sdo.cohortid.astype('int')
-
-        return self.sdo
-    def __prepare_durations__(self, duration_list):
-        """melt multiple duration events in dataframe to separate rows and return ordered dataframe"""
-        i_durations = pd.concat(duration_list, ignore_index=True)
-
-        # expand listed durations to separate rows
-        s = i_durations.apply(
-            lambda x: pd.Series(x['durations']),axis=1).\
-            stack().\
-            reset_index(level=1, drop=True)
-        s.name = 'duration'
-
-        # join back on original dataframe
-        i_durations = i_durations.\
-            drop('durations', axis=1).\
-            join(s)
-
-        # sequentially label infection durations
-        i_durations['i_event'] = i_durations.\
-            groupby(['cohortid', 'h_popUID']).\
-            cumcount()
-
-        # convert duration to integer of days
-        i_durations['duration'] = i_durations.\
-            duration.dt.days
-
-        self.durations = i_durations[['cohortid', 'h_popUID', 'i_event', 'duration']]
-        # return ordered dataframe
-        return self.durations
-    def __prepare_skips__(self):
-        """calculates number of skips for each cid~h_popUID at each date"""
-        timelines = self.__all_timelines__()
-
-        skip_dataframe = []
-
-        for cid, timeline in timelines.items():
-
-            # case where cid excluded from meta
-            if timeline.empty:
-                continue
-
-            # find infection events and skips between them
-            timeline[['i_events', 'skips']] = timeline.apply(
-                lambda x : self.__calculate_skips__(x, diagnose=True),
-                axis = 1, result_type = 'expand')
-
-            # for haplotype row create a dataframe of skips and dates
-            for _, row in timeline.iterrows():
-                skip_dataframe.append(self.__arrange_skips__(row, cid))
-
-        self.skip_df = pd.concat(skip_dataframe)
-
-        self.skip_df.date = pd.to_datetime(self.skip_df.date)
-
-        return self.skip_df
-    def __prepare_new_infections__(self, cids, hids, new_ifx):
-        """prepare new infections dataframe for downstream usage"""
-
-        # create dataframe from lists
-        self.new_infections = pd.DataFrame({
-            'cohortid' : cids,
-            'h_popUID' : hids,
-            'n_infection' : new_ifx})
-
-        # filter haplotypes without new infections
-        self.new_infections = self.new_infections[
-            self.new_infections.n_infection > 0]
-
-        # sum total new infections by cohortid
-        new_infection_totals = self.new_infections.\
-            groupby('cohortid').\
-            agg({'n_infection' : 'sum'}).\
-            rename(columns = {'n_infection' : 'total_n_infection'}).\
-            reset_index()
-
-        # merge back into original dataframe
-        self.new_infections = self.new_infections.merge(
-            new_infection_totals, how = 'left')
-
-        # arrange columns for beauty
-        self.new_infections = self.new_infections[
-            ['cohortid', 'total_n_infection', 'h_popUID', 'n_infection']]
-
-        return self.new_infections
     def __add_agecat_to_sdo__(self):
         """add agecategories to seekdeep dataframe"""
         self.age_categories = self.meta.\
