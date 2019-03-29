@@ -36,10 +36,10 @@ def get_args():
         help="Default duration rate to use for single event infections (default = 15 days)")
     p.add_argument('-b', '--burnin', default='2018-01-01', type=str,
         help="Date to begin considering new infections (YYYY-MM-DD)")
-    p.add_argument('-t', '--qpcr_threshold', default=0, type=float,
-        help="qpcr threshold to consider an infection true or false")
-    p.add_argument('-q', '--qpcr_flag', action='store_true',
-        help="use pcr of the date instead of the true false of the haplotype")
+    p.add_argument('-t', '--qpcr_threshold', default=0.1, type=float,
+        help="qpcr threshold to consider a sample (set to 0 for no threshold)")
+    p.add_argument('-q', '--fail_flag', action='store_false', default=True,
+        help="if no haplotypes are recovered and PCR is positive, drop sample (default=True, use flag to deactivate filter)")
 
     # if no args given print help
     if len(sys.argv) == 1:
@@ -61,7 +61,7 @@ def main():
     s = SeekDeepUtils(
         sdo = sdo,
         meta = meta,
-        date_qpcr=args.qpcr_flag,
+        fail_flag=args.fail_flag,
         qpcr_threshold=args.qpcr_threshold)
 
     # calculate allele frequency
@@ -85,20 +85,17 @@ def main():
     # calculate start and end of infections
     elif args.old_new_infections:
         onl = s.Old_New_Infection_Labels(
-            sdo, meta,
             allowedSkips = args.num_skips,
             default=args.default_duration,
             burnin=args.burnin)
         return print_out(onl)
 
     elif args.new_infections:
-        new_infections = s.New_Infections(
-            sdo, meta, allowedSkips=args.num_skips)
+        new_infections = s.New_Infections(allowedSkips=args.num_skips)
         return print_out(new_infections)
 
     elif args.force_of_infection:
         foi_params = s.Force_of_Infection(
-            sdo, meta,
             foi_method=args.force_of_infection,
             allowedSkips=args.num_skips,
             default=args.default_duration,
