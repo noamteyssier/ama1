@@ -12,11 +12,13 @@ sns.set_style('ticks')
 class Survival:
     pd.set_option('mode.chained_assignment', None) # remove settingwithcopywarning
     warnings.simplefilter(action='ignore', category=FutureWarning)
-    def __init__(self, sdo, meta, burnin='2018-01-01', allowedSkips=3):
+    def __init__(self, sdo, meta, burnin='2018-01-01', allowedSkips=3, fail_flag=True, qpcr_threshold = 0.1):
         self.sdo = sdo
         self.meta = meta
         self.burnin = pd.to_datetime(burnin)
         self.allowedSkips = allowedSkips
+        self.fail_flag = fail_flag
+        self.qpcr_threshold = qpcr_threshold
 
         self.pr2 = pd.DataFrame()
         self.timelines = pd.DataFrame()
@@ -37,7 +39,17 @@ class Survival:
         """prepare dataframe for timeline creation"""
         self.__prepare_sdo__()
         self.__prepare_meta__()
+
+        # filter qpcr dates
+        if self.qpcr_threshold > 0:
+            self.meta = self.meta[(self.meta.qpcr == 0) | (self.meta.qpcr >= self.qpcr_threshold)]
+
+        # merge meta and sdo
         self.pr2 = self.meta.merge(self.sdo, how='left')
+
+        # filter all positive qpcr dates with failed sequencing
+        if self.fail_flag:
+            self.pr2 = self.pr2[~((self.pr2.qpcr > 0) & np.isnan(self.pr2.c_AveragedFrac))]
     def __prepare_meta__(self):
         """prepare meta data for usage in timeline generation"""
         self.agecat_rename = {
@@ -305,6 +317,7 @@ class Survival:
     def OldWaning(self, bootstrap=False):
         """calculate fraction of old clones remaining across each month past the burnin"""
         def monthly_kept(x):
+            sys.exit(x)
             return x[x.val == 1][['cohortid', 'hid']].drop_duplicates().shape[0]
         def waning(df):
             monthly_counts = df.groupby('date_bin').apply(lambda x : monthly_kept(x))
@@ -340,8 +353,8 @@ def main():
 
     # calculate Expected and Observed for skip vals in range
     s = Survival(sdo, meta)
-    s.OldNewSurvival(bootstrap=True)
-    s.CID_oldnewsurvival(bootstrap=True)
+    # s.OldNewSurvival(bootstrap=True)
+    # s.CID_oldnewsurvival(bootstrap=True)
     s.OldWaning(bootstrap=True)
 
 if __name__ == '__main__':
