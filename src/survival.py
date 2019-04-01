@@ -411,9 +411,9 @@ def main():
 
     # calculate Expected and Observed for skip vals in range
     s = Survival(sdo, meta, fail_flag=False, qpcr_threshold=0)
-    # s.OldNewSurvival(bootstrap=True)
+    s.OldNewSurvival(bootstrap=True)
     s.CID_oldnewsurvival(bootstrap=True)
-    # s.OldWaning(bootstrap=True)
+    s.OldWaning(bootstrap=True)
 
 if __name__ == '__main__':
     main()
