@@ -317,7 +317,7 @@ class Survival:
     def OldWaning(self, bootstrap=False):
         """calculate fraction of old clones remaining across each month past the burnin"""
         def monthly_kept(x):
-            sys.exit(x)
+            # sys.exit(x)
             return x[x.val == 1][['cohortid', 'hid']].drop_duplicates().shape[0]
         def waning(df):
             monthly_counts = df.groupby('date_bin').apply(lambda x : monthly_kept(x))
@@ -327,22 +327,36 @@ class Survival:
             oc = monthly_counts[oc_idx].values
             monthly_counts = monthly_counts/oc
             return monthly_counts[monthly_counts.index > self.burnin]
-
+        def plot_wane(omc, boots=pd.DataFrame()):
+            g = sns.lineplot(x = omc.index, y = omc.values, legend=False, lw=5)
+            if not boots.empty:
+                plt.fill_between(
+                    boots.index,
+                    y1=[i for i,j in boots.values],
+                    y2=[j for i,j in boots.values],
+                    alpha=0.3)
+            plt.xlabel('Date')
+            plt.title('Percentage')
+            plt.title('Fraction of Old Clones Remaining')
+            g.get_figure().savefig("../plots/survival/oldClones.pdf")
+            plt.show()
+            plt.close()
 
         omc = waning(self.original_infections)
         if bootstrap:
-            for i in tqdm(range(500), desc='bootstrapping'):
+            boots = []
+            for i in tqdm(range(200), desc='bootstrapping'):
                 self.__bootstrap_cid__()
                 mc = waning(self.infections)
-                sns.lineplot(x = mc.index, y = mc.values, legend=False, alpha = 0.01, color='black')
+                boots.append(mc)
+            boots = pd.concat(boots)
+            boots = boots.groupby(level = 0).apply(lambda x : np.percentile(x, [2.5, 97.5]))
+            plot_wane(omc, boots)
+        else:
+            plot_wane(omc)
 
-        g = sns.lineplot(x = omc.index, y = omc.values)
-        plt.xlabel('Date')
-        plt.title('Percentage')
-        plt.title('Fraction of Old Clones Remaining')
-        g.get_figure().savefig("../plots/survival/oldClones.png")
-        plt.show()
-        plt.close()
+
+
 
 def main():
     sdo_fn = "../prism2/full_prism2/filtered_5pc_10r.tab"
@@ -352,7 +366,7 @@ def main():
     meta = pd.read_stata(meta_fn)
 
     # calculate Expected and Observed for skip vals in range
-    s = Survival(sdo, meta)
+    s = Survival(sdo, meta, fail_flag=False, qpcr_threshold=0)
     # s.OldNewSurvival(bootstrap=True)
     # s.CID_oldnewsurvival(bootstrap=True)
     s.OldWaning(bootstrap=True)
