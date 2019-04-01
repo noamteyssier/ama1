@@ -12,11 +12,13 @@ sns.set_style('ticks')
 class Survival:
     pd.set_option('mode.chained_assignment', None) # remove settingwithcopywarning
     warnings.simplefilter(action='ignore', category=FutureWarning)
-    def __init__(self, sdo, meta, burnin='2018-01-01', allowedSkips=3):
+    def __init__(self, sdo, meta, burnin='2018-01-01', allowedSkips=3, fail_flag=True, qpcr_threshold = 0.1):
         self.sdo = sdo
         self.meta = meta
         self.burnin = pd.to_datetime(burnin)
         self.allowedSkips = allowedSkips
+        self.fail_flag = fail_flag
+        self.qpcr_threshold = qpcr_threshold
 
         self.pr2 = pd.DataFrame()
         self.timelines = pd.DataFrame()
@@ -37,7 +39,17 @@ class Survival:
         """prepare dataframe for timeline creation"""
         self.__prepare_sdo__()
         self.__prepare_meta__()
+
+        # filter qpcr dates
+        if self.qpcr_threshold > 0:
+            self.meta = self.meta[(self.meta.qpcr == 0) | (self.meta.qpcr >= self.qpcr_threshold)]
+
+        # merge meta and sdo
         self.pr2 = self.meta.merge(self.sdo, how='left')
+
+        # filter all positive qpcr dates with failed sequencing
+        if self.fail_flag:
+            self.pr2 = self.pr2[~((self.pr2.qpcr > 0) & np.isnan(self.pr2.c_AveragedFrac))]
     def __prepare_meta__(self):
         """prepare meta data for usage in timeline generation"""
         self.agecat_rename = {
@@ -233,23 +245,36 @@ class Survival:
                 apply(lambda x : x / x.sum())
             chc_counts['val'] = chc_counts.val.apply(lambda x : 'old' if x==1 else 'new')
             return chc_counts
-
-
+        def plot_ons(odf, boots=pd.DataFrame()):
+            if not boots.empty:
+                for v in odf.val.unique():
+                    sns.lineplot(data=odf[odf.val == v],  x='date_bin', y='pc', label=v, lw=4)
+                    plt.fill_between(
+                        boots[v].index,
+                        [i for i,j in boots[v].values],
+                        [j for i,j in boots[v].values],
+                        alpha = 0.5)
+            else:
+                sns.lineplot(data=odf, x='date_bin', y = 'pc', hue='val')
+            plt.xlabel('Date')
+            plt.ylabel('Percentage')
+            plt.title('Fraction of Old Clones In Infected Population')
+            plt.savefig("../plots/survival/hid_survival.pdf")
+            plt.show()
+            plt.close()
         odf = calculate_percentages(self.original_infections)
-
         if bootstrap:
-            for i in tqdm(range(300), desc = 'bootstrapping'):
+            boots = []
+            for i in tqdm(range(200), desc = 'bootstrapping'):
                 self.__bootstrap_cid__()
                 df = calculate_percentages(self.infections)
-                sns.lineplot(data=df, x='date_bin', y='pc', hue='val', alpha = 0.05, legend=False)
+                boots.append(df)
 
-        g = sns.lineplot(data=odf, x='date_bin', y='pc', hue='val')
-        plt.xlabel('Date')
-        plt.ylabel('Percentage')
-        plt.title('Fraction of Old Clones In Infected Population')
-        g.get_figure().savefig("../plots/survival/hid_survival.png")
-        plt.show()
-        plt.close()
+            boots = pd.concat(boots)
+            boots = boots.groupby(['val', 'date_bin']).apply(lambda x : np.percentile(x.pc, [2.5, 97.5]))
+            plot_ons(odf, boots)
+        else:
+            plot_ons(odf)
     def CID_oldnewsurvival(self, bootstrap=False):
         """plot proportion of people with old v new v mixed"""
         def cid_cat_count(x, mix=True):
@@ -287,24 +312,56 @@ class Survival:
             df['mixed'] = df.c_val.apply(lambda x : 'mix' in x)
 
             return df
+        def plot_cons(odf, boots = pd.DataFrame()):
+            if not boots.empty:
+                lines = []
+                colors = []
+                for v in odf.c_val.unique():
+                    ls = ':' if 'mix' in v else '-'
+                    cl = 'teal' if 'old' in v else 'coral'
+                    ax = sns.lineplot(
+                        data=odf[odf.c_val == v],
+                        x='date_bin',
+                        y='value',
+                        label=v,
+                        # color=cl,
+                        lw=4)
+                    plt.fill_between(
+                        boots[v].index,
+                        [i for i,j in boots[v].values],
+                        [j for i,j in boots[v].values],
+                        alpha = 0.3)
+                    lines.append(ls)
+                    colors.append(cl)
+                [ax.lines[i].set_linestyle(lines[i]) for i in range(len(lines))]
+                [ax.lines[i].set_color(colors[i]) for i in range(len(lines))]
+            else:
+                sns.lineplot(data=odf, x='date_bin', y ='value', hue='c_val', style='mixed')
+
+
+            plt.xlabel('Date')
+            plt.ylabel('Percentage')
+            plt.title('Fraction of New and Old Clones by Individual')
+            plt.savefig("../plots/survival/CID_survival.pdf")
+            plt.show()
+            plt.close()
 
         odf = calculate_percentages(self.original_infections)
         if bootstrap :
-            for i in tqdm(range(300), desc = 'bootstrapping'):
+            boots = []
+            for i in tqdm(range(200), desc = 'bootstrapping'):
                 self.__bootstrap_cid__()
                 df = calculate_percentages(self.infections)
-                sns.lineplot(data=df, x='date_bin', y ='value', hue='c_val', style='mixed', legend=False, alpha=0.05)
-
-        g = sns.lineplot(data=odf, x='date_bin', y ='value', hue='c_val', style='mixed')
-        plt.xlabel('Date')
-        plt.ylabel('Percentage')
-        plt.title('Fraction of New and Old Clones by Individual')
-        g.get_figure().savefig("../plots/survival/CID_survival.png")
-        plt.show()
-        plt.close()
+                boots.append(df)
+            boots = pd.concat(boots)
+            boots = boots.groupby(['c_val', 'date_bin']).apply(lambda x : np.percentile(x.value, [2.5, 97.5]))
+            plot_cons(odf, boots)
+        else:
+            plot_cons(odf)
     def OldWaning(self, bootstrap=False):
         """calculate fraction of old clones remaining across each month past the burnin"""
         def monthly_kept(x):
+            # sys.exit(x)
             return x[x.val == 1][['cohortid', 'hid']].drop_duplicates().shape[0]
         def waning(df):
             monthly_counts = df.groupby('date_bin').apply(lambda x : monthly_kept(x))
@@ -314,22 +371,36 @@ class Survival:
             oc = monthly_counts[oc_idx].values
             monthly_counts = monthly_counts/oc
             return monthly_counts[monthly_counts.index > self.burnin]
-
+        def plot_wane(omc, boots=pd.DataFrame()):
+            g = sns.lineplot(x = omc.index, y = omc.values, legend=False, lw=5)
+            if not boots.empty:
+                plt.fill_between(
+                    boots.index,
+                    y1=[i for i,j in boots.values],
+                    y2=[j for i,j in boots.values],
+                    alpha=0.3)
+            plt.xlabel('Date')
+            plt.title('Percentage')
+            plt.title('Fraction of Old Clones Remaining')
+            g.get_figure().savefig("../plots/survival/oldClones.pdf")
+            plt.show()
+            plt.close()
 
         omc = waning(self.original_infections)
         if bootstrap:
-            for i in tqdm(range(500), desc='bootstrapping'):
+            boots = []
+            for i in tqdm(range(200), desc='bootstrapping'):
                 self.__bootstrap_cid__()
                 mc = waning(self.infections)
-                sns.lineplot(x = mc.index, y = mc.values, legend=False, alpha = 0.01, color='black')
+                boots.append(mc)
+            boots = pd.concat(boots)
+            boots = boots.groupby(level = 0).apply(lambda x : np.percentile(x, [2.5, 97.5]))
+            plot_wane(omc, boots)
+        else:
+            plot_wane(omc)
 
-        g = sns.lineplot(x = omc.index, y = omc.values)
-        plt.xlabel('Date')
-        plt.title('Percentage')
-        plt.title('Fraction of Old Clones Remaining')
-        g.get_figure().savefig("../plots/survival/oldClones.png")
-        plt.show()
-        plt.close()
+
+
 
 def main():
     sdo_fn = "../prism2/full_prism2/filtered_5pc_10r.tab"
@@ -339,7 +410,7 @@ def main():
     meta = pd.read_stata(meta_fn)
 
     # calculate Expected and Observed for skip vals in range
-    s = Survival(sdo, meta)
+    s = Survival(sdo, meta, fail_flag=False, qpcr_threshold=0)
     s.OldNewSurvival(bootstrap=True)
     s.CID_oldnewsurvival(bootstrap=True)
     s.OldWaning(bootstrap=True)
