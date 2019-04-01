@@ -6,6 +6,10 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import sys, warnings, time
 from tqdm import tqdm
+
+from scipy.optimize import minimize
+
+# np.random.seed(42)
 sns.set(rc={'figure.figsize':(15, 12), 'lines.linewidth': 2})
 sns.set_style('ticks')
 
@@ -19,6 +23,7 @@ class Survival:
         self.allowedSkips = allowedSkips
         self.fail_flag = fail_flag
         self.qpcr_threshold = qpcr_threshold
+        self.minimum_duration = pd.Timedelta('15 days')
 
         self.pr2 = pd.DataFrame()
         self.timelines = pd.DataFrame()
@@ -398,9 +403,37 @@ class Survival:
             plot_wane(omc, boots)
         else:
             plot_wane(omc)
+    def Durations(self):
+        """estimate durations using exponential model"""
+        def inf_durations(x):
+            cid = x.cohortid.unique()[0]
+            burnout = pd.to_datetime(self.cid_dates[cid][-self.allowedSkips:]).min()
+
+            s_obs = ~np.any(x.date <= self.burnin)
+            e_obs = ~np.any(x.date >= burnout)
+
+
+            t_start = x.date.min() - self.minimum_duration if s_obs else self.study_start
+            t_end = x.date.max() + self.minimum_duration if e_obs else self.study_end
+
+            t = t_end - t_start
+
+            return t
+        def exp_likelihood(l, t):
+            lik = l * np.exp(-l * t)
+            log_lik = np.log(lik).sum()
+            return -1 * log_lik
 
 
 
+        self.study_start = self.infections.date.min()
+        self.study_end = self.infections.date.max()
+        t = self.infections.groupby(['cohortid', 'hid']).apply(lambda x : inf_durations(x)).dt.days.values
+        l = np.random.random()
+        m = minimize(exp_likelihood, l, t, method='SLSQP', bounds=((0, None), ))
+        estimated_lambda = m.x
+        expected_duration = 1/estimated_lambda
+        print("Calculated Expected Duration : {0} days".format(expected_duration[0]))
 
 def main():
     sdo_fn = "../prism2/full_prism2/filtered_5pc_10r.tab"
@@ -414,6 +447,7 @@ def main():
     s.OldNewSurvival(bootstrap=True)
     s.CID_oldnewsurvival(bootstrap=True)
     s.OldWaning(bootstrap=True)
+    s.Durations()
 
 if __name__ == '__main__':
     main()
