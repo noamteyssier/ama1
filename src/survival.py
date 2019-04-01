@@ -245,23 +245,38 @@ class Survival:
                 apply(lambda x : x / x.sum())
             chc_counts['val'] = chc_counts.val.apply(lambda x : 'old' if x==1 else 'new')
             return chc_counts
+        def plot_ons(odf, boots=pd.DataFrame()):
+            if not boots.empty:
+                for v in odf.val.unique():
+                    sns.lineplot(data=odf[odf.val == v],  x='date_bin', y='pc', label=v)
+                    plt.fill_between(
+                        boots[v].index,
+                        [i for i,j in boots[v].values],
+                        [j for i,j in boots[v].values],
+                        alpha = 0.5)
+            else:
+                sns.lineplot(data=odf, x='date_bin', y = 'pc', hue='val')
 
-
+            plt.xlabel('Date')
+            plt.ylabel('Percentage')
+            plt.title('Fraction of Old Clones In Infected Population')
+            plt.savefig("../plots/survival/hid_survival.pdf")
+            plt.show()
+            plt.close()
         odf = calculate_percentages(self.original_infections)
-
         if bootstrap:
-            for i in tqdm(range(300), desc = 'bootstrapping'):
+            boots = []
+            for i in tqdm(range(200), desc = 'bootstrapping'):
                 self.__bootstrap_cid__()
                 df = calculate_percentages(self.infections)
-                sns.lineplot(data=df, x='date_bin', y='pc', hue='val', alpha = 0.05, legend=False)
+                boots.append(df)
 
-        g = sns.lineplot(data=odf, x='date_bin', y='pc', hue='val')
-        plt.xlabel('Date')
-        plt.ylabel('Percentage')
-        plt.title('Fraction of Old Clones In Infected Population')
-        g.get_figure().savefig("../plots/survival/hid_survival.png")
-        plt.show()
-        plt.close()
+            boots = pd.concat(boots)
+            boots = boots.groupby(['val', 'date_bin']).apply(lambda x : np.percentile(x.pc, [2.5, 97.5]))
+            plot_ons(odf, boots)
+        else:
+            plot_ons(odf)
+
     def CID_oldnewsurvival(self, bootstrap=False):
         """plot proportion of people with old v new v mixed"""
         def cid_cat_count(x, mix=True):
@@ -367,9 +382,9 @@ def main():
 
     # calculate Expected and Observed for skip vals in range
     s = Survival(sdo, meta, fail_flag=False, qpcr_threshold=0)
-    # s.OldNewSurvival(bootstrap=True)
+    s.OldNewSurvival(bootstrap=True)
     # s.CID_oldnewsurvival(bootstrap=True)
-    s.OldWaning(bootstrap=True)
+    # s.OldWaning(bootstrap=True)
 
 if __name__ == '__main__':
     main()
