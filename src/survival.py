@@ -248,7 +248,7 @@ class Survival:
         def plot_ons(odf, boots=pd.DataFrame()):
             if not boots.empty:
                 for v in odf.val.unique():
-                    sns.lineplot(data=odf[odf.val == v],  x='date_bin', y='pc', label=v)
+                    sns.lineplot(data=odf[odf.val == v],  x='date_bin', y='pc', label=v, lw=4)
                     plt.fill_between(
                         boots[v].index,
                         [i for i,j in boots[v].values],
@@ -256,7 +256,6 @@ class Survival:
                         alpha = 0.5)
             else:
                 sns.lineplot(data=odf, x='date_bin', y = 'pc', hue='val')
-
             plt.xlabel('Date')
             plt.ylabel('Percentage')
             plt.title('Fraction of Old Clones In Infected Population')
@@ -276,7 +275,6 @@ class Survival:
             plot_ons(odf, boots)
         else:
             plot_ons(odf)
-
     def CID_oldnewsurvival(self, bootstrap=False):
         """plot proportion of people with old v new v mixed"""
         def cid_cat_count(x, mix=True):
@@ -314,21 +312,52 @@ class Survival:
             df['mixed'] = df.c_val.apply(lambda x : 'mix' in x)
 
             return df
+        def plot_cons(odf, boots = pd.DataFrame()):
+            if not boots.empty:
+                lines = []
+                colors = []
+                for v in odf.c_val.unique():
+                    ls = ':' if 'mix' in v else '-'
+                    cl = 'teal' if 'old' in v else 'coral'
+                    ax = sns.lineplot(
+                        data=odf[odf.c_val == v],
+                        x='date_bin',
+                        y='value',
+                        label=v,
+                        # color=cl,
+                        lw=4)
+                    plt.fill_between(
+                        boots[v].index,
+                        [i for i,j in boots[v].values],
+                        [j for i,j in boots[v].values],
+                        alpha = 0.3)
+                    lines.append(ls)
+                    colors.append(cl)
+                [ax.lines[i].set_linestyle(lines[i]) for i in range(len(lines))]
+                [ax.lines[i].set_color(colors[i]) for i in range(len(lines))]
+            else:
+                sns.lineplot(data=odf, x='date_bin', y ='value', hue='c_val', style='mixed')
+
+
+            plt.xlabel('Date')
+            plt.ylabel('Percentage')
+            plt.title('Fraction of New and Old Clones by Individual')
+            plt.savefig("../plots/survival/CID_survival.pdf")
+            plt.show()
+            plt.close()
 
         odf = calculate_percentages(self.original_infections)
         if bootstrap :
-            for i in tqdm(range(300), desc = 'bootstrapping'):
+            boots = []
+            for i in tqdm(range(200), desc = 'bootstrapping'):
                 self.__bootstrap_cid__()
                 df = calculate_percentages(self.infections)
-                sns.lineplot(data=df, x='date_bin', y ='value', hue='c_val', style='mixed', legend=False, alpha=0.05)
-
-        g = sns.lineplot(data=odf, x='date_bin', y ='value', hue='c_val', style='mixed')
-        plt.xlabel('Date')
-        plt.ylabel('Percentage')
-        plt.title('Fraction of New and Old Clones by Individual')
-        g.get_figure().savefig("../plots/survival/CID_survival.png")
-        plt.show()
-        plt.close()
+                boots.append(df)
+            boots = pd.concat(boots)
+            boots = boots.groupby(['c_val', 'date_bin']).apply(lambda x : np.percentile(x.value, [2.5, 97.5]))
+            plot_cons(odf, boots)
+        else:
+            plot_cons(odf)
     def OldWaning(self, bootstrap=False):
         """calculate fraction of old clones remaining across each month past the burnin"""
         def monthly_kept(x):
@@ -382,8 +411,8 @@ def main():
 
     # calculate Expected and Observed for skip vals in range
     s = Survival(sdo, meta, fail_flag=False, qpcr_threshold=0)
-    s.OldNewSurvival(bootstrap=True)
-    # s.CID_oldnewsurvival(bootstrap=True)
+    # s.OldNewSurvival(bootstrap=True)
+    s.CID_oldnewsurvival(bootstrap=True)
     # s.OldWaning(bootstrap=True)
 
 if __name__ == '__main__':
