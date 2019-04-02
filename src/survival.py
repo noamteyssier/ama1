@@ -28,6 +28,7 @@ class Survival:
         self.pr2 = pd.DataFrame()
         self.timelines = pd.DataFrame()
         self.cid_dates = pd.Series()
+        self.treatments = pd.Series()
         self.infections = pd.DataFrame()
         self.mass_reindex = []
         self.date_bins = np.array([])
@@ -36,6 +37,7 @@ class Survival:
         self.__prepare_df__()
         self.__timeline__()
         self.__cid_dates__()
+        self.__mark_treatments__()
         self.__label_new_infections__()
         self.__bin_dates__()
 
@@ -55,13 +57,15 @@ class Survival:
         # filter all positive qpcr dates with failed sequencing
         if self.fail_flag:
             self.pr2 = self.pr2[~((self.pr2.qpcr > 0) & np.isnan(self.pr2.c_AveragedFrac))]
+
+        self.pr2.date = pd.to_datetime(self.pr2.date)
     def __prepare_meta__(self):
         """prepare meta data for usage in timeline generation"""
         self.agecat_rename = {
             '< 5 years'  : 1,
             '5-15 years' : 2,
             '16 years or older' : 3}
-        self.meta = self.meta[['date', 'cohortid', 'qpcr', 'agecat']]
+        self.meta = self.meta[['date', 'cohortid', 'qpcr', 'agecat', 'malariacat']]
         self.meta['date'] = self.meta['date'].astype('str')
         self.meta['cohortid'] = self.meta['cohortid'].astype('int')
         self.meta['agecat'] = self.meta.agecat.apply(lambda x : self.agecat_rename[x])
@@ -118,6 +122,11 @@ class Survival:
         self.date_bins = pd.concat(dfs)
         self.infections = self.infections.\
             merge(self.date_bins)
+    def __mark_treatments__(self):
+        """mark all malaria dates where treatment was given"""
+        def treatments(x):
+            return x[x.malariacat == 'Malaria'].date.unique()
+        self.treatments = self.pr2.groupby(['cohortid']).apply(lambda x : treatments(x))
     def __get_skips__(self, x):
         """return skips for timeline row"""
         # find all infection events
@@ -419,6 +428,28 @@ class Survival:
             t = t_end - t_start
 
             return t
+        def conditional_inf_durations(x):
+            cid = x.cohortid.unique()[0]
+            burnout = pd.to_datetime(self.cid_dates[cid][-self.allowedSkips:]).min()
+            treatment = False
+
+
+            if x.date.max() <= self.burnin:
+                return np.nan
+            if x.date.max().to_datetime64() in self.treatments[cid]:
+                treatment = True
+
+            s_obs = ~np.any(x.date <= self.burnin)
+            e_obs = ~np.any(x.date >= burnout)
+
+
+            t_start = x.date.min() - self.minimum_duration if s_obs else self.burnin
+            t_end = x.date.max() if e_obs else self.study_end
+            t_end = t_end + self.minimum_duration if not treatment else t_end
+
+            t = t_end - t_start
+
+            return t
         def exp_likelihood(l, t):
             lik = l * np.exp(-l * t)
             log_lik = np.log(lik).sum()
@@ -428,7 +459,9 @@ class Survival:
 
         self.study_start = self.infections.date.min()
         self.study_end = self.infections.date.max()
-        t = self.infections.groupby(['cohortid', 'hid']).apply(lambda x : inf_durations(x)).dt.days.values
+        t = self.infections.groupby(['cohortid', 'hid']).apply(lambda x : conditional_inf_durations(x)).dt.days.values
+        # t = self.infections.groupby(['cohortid', 'hid']).apply(lambda x : inf_durations(x)).dt.days.values
+        t = t[~np.isnan(t)]
         l = np.random.random()
         m = minimize(exp_likelihood, l, t, method='SLSQP', bounds=((0, None), ))
         estimated_lambda = m.x
@@ -444,9 +477,9 @@ def main():
 
     # calculate Expected and Observed for skip vals in range
     s = Survival(sdo, meta, fail_flag=False, qpcr_threshold=0)
-    s.OldNewSurvival(bootstrap=True)
-    s.CID_oldnewsurvival(bootstrap=True)
-    s.OldWaning(bootstrap=True)
+    # s.OldNewSurvival(bootstrap=True)
+    # s.CID_oldnewsurvival(bootstrap=True)
+    # s.OldWaning(bootstrap=True)
     s.Durations()
 
 if __name__ == '__main__':
