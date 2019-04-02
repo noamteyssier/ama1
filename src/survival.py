@@ -429,6 +429,7 @@ class Survival:
 
             return t
         def conditional_inf_durations(x):
+            """only add minimum_duration if not treated and set hard burnin"""
             cid = x.cohortid.unique()[0]
             burnout = pd.to_datetime(self.cid_dates[cid][-self.allowedSkips:]).min()
             treatment = False
@@ -477,9 +478,9 @@ def main():
 
     # calculate Expected and Observed for skip vals in range
     s = Survival(sdo, meta, fail_flag=False, qpcr_threshold=0)
-    # s.OldNewSurvival(bootstrap=True)
-    # s.CID_oldnewsurvival(bootstrap=True)
-    # s.OldWaning(bootstrap=True)
+    s.OldNewSurvival(bootstrap=True)
+    s.CID_oldnewsurvival(bootstrap=True)
+    s.OldWaning(bootstrap=True)
     s.Durations()
 
 if __name__ == '__main__':
