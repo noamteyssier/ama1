@@ -9,7 +9,7 @@ from tqdm import tqdm
 
 from scipy.optimize import minimize
 
-# np.random.seed(42)
+np.random.seed(42)
 sns.set(rc={'figure.figsize':(15, 12), 'lines.linewidth': 2})
 sns.set_style('ticks')
 
@@ -33,6 +33,7 @@ class Survival:
         self.mass_reindex = []
         self.date_bins = np.array([])
         self.column_bins = np.array([])
+        self.bootstrap_id_dates = pd.Series()
 
         self.__prepare_df__()
         self.__timeline__()
@@ -42,6 +43,7 @@ class Survival:
         self.__bin_dates__()
 
         self.original_infections = self.infections.copy()
+        self.in_boot = False
     def __prepare_df__(self):
         """prepare dataframe for timeline creation"""
         self.__prepare_sdo__()
@@ -242,6 +244,9 @@ class Survival:
         # create array of new cid_id with expected length
         new_cid = np.concatenate([np.full(cid_size[i], i) for i in range(cid_size.size)]).ravel()
 
+        # have hashable id num to cid
+        self.bootstrap_id_dates = pd.Series(rc)
+
         self.infections = self.infections.reset_index()
         self.infections['cohortid'] = new_cid
     def OldNewSurvival(self, bootstrap=False):
@@ -412,7 +417,7 @@ class Survival:
             plot_wane(omc, boots)
         else:
             plot_wane(omc)
-    def Durations(self):
+    def Durations(self, bootstrap=False):
         """estimate durations using exponential model"""
         def inf_durations(x):
             cid = x.cohortid.unique()[0]
@@ -431,9 +436,11 @@ class Survival:
         def conditional_inf_durations(x):
             """only add minimum_duration if not treated and set hard burnin"""
             cid = x.cohortid.unique()[0]
+            if self.in_boot:
+                cid = self.bootstrap_id_dates[cid]
+
             burnout = pd.to_datetime(self.cid_dates[cid][-self.allowedSkips:]).min()
             treatment = False
-
 
             if x.date.max() <= self.burnin:
                 return np.nan
@@ -455,19 +462,45 @@ class Survival:
             lik = l * np.exp(-l * t)
             log_lik = np.log(lik).sum()
             return -1 * log_lik
+        def fit_model(df):
+            self.study_start = df.date.min()
+            self.study_end = df.date.max()
+            t = df.\
+                groupby(['cohortid', 'hid']).\
+                apply(lambda x : conditional_inf_durations(x)).\
+                dt.days.values
+            t = t[~np.isnan(t)]
+            while True:
+                lam = np.random.random()
+                m = minimize(exp_likelihood, lam, t, method='SLSQP', bounds=((0, 1), ))
+                if m.success:
+                    break
+            return m.x
+        def plot_boots(boots, lam):
+            sns.distplot(boots, color='teal')
+            plt.axvline(lam, linestyle=':', lw=5, color='teal')
+            plt.xlabel("Calculated Lambda")
+            plt.title("Calculated Lambda and Distribution of Bootstrapped Lambdas")
+            plt.savefig("../plots/survival/exponentialSurvival.pdf")
+            plt.show()
+            plt.close()
 
-
-
-        self.study_start = self.infections.date.min()
-        self.study_end = self.infections.date.max()
-        t = self.infections.groupby(['cohortid', 'hid']).apply(lambda x : conditional_inf_durations(x)).dt.days.values
-        # t = self.infections.groupby(['cohortid', 'hid']).apply(lambda x : inf_durations(x)).dt.days.values
-        t = t[~np.isnan(t)]
-        l = np.random.random()
-        m = minimize(exp_likelihood, l, t, method='SLSQP', bounds=((0, None), ))
-        estimated_lambda = m.x
-        expected_duration = 1/estimated_lambda
-        print("Calculated Expected Duration : {0} days".format(expected_duration[0]))
+        lam = fit_model(self.original_infections)
+        if bootstrap:
+            self.in_boot=True
+            boots = []
+            for i in tqdm(range(300), desc='bootstrapping'):
+                self.__bootstrap_cid__()
+                boot_lam = fit_model(self.infections)
+                boots.append(boot_lam)
+            boots = np.array(boots)
+            lower, upper = np.percentile(boots, [2.5, 97.5])
+            print("Fit Lambda : {0} ({1}, {2})".format(lam, lower, upper))
+            print("Expected Duration : {0} ({1}, {2})".format(1/lam, 1/upper, 1/lower))
+            plot_boots(boots, lam)
+        else:
+            print("Fit Lambda : {}".format(lam))
+            print("Expected Duration : {0} days".format(1 / lam))
 
 def main():
     sdo_fn = "../prism2/full_prism2/filtered_5pc_10r.tab"
@@ -478,10 +511,10 @@ def main():
 
     # calculate Expected and Observed for skip vals in range
     s = Survival(sdo, meta, fail_flag=False, qpcr_threshold=0)
-    s.OldNewSurvival(bootstrap=True)
-    s.CID_oldnewsurvival(bootstrap=True)
-    s.OldWaning(bootstrap=True)
-    s.Durations()
+    # s.OldNewSurvival(bootstrap=True)
+    # s.CID_oldnewsurvival(bootstrap=True)
+    # s.OldWaning(bootstrap=True)
+    s.Durations(bootstrap=True)
 
 if __name__ == '__main__':
     main()
