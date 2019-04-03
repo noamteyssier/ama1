@@ -461,7 +461,7 @@ class Survival:
             self.study_start = df.date.min()
             self.study_end = df.date.max()
             t = df.\
-                groupby(['cohortid', 'hid']).\
+                groupby(['cohortid', 'hid', 'val']).\
                 apply(lambda x : inf_durations(x)).\
                 dt.days.values
             t = t[~np.isnan(t)]
@@ -542,11 +542,11 @@ class Survival:
             self.study_start = df.date.min()
             self.study_end = df.date.max()
             t = df.\
-                groupby(['cohortid', 'hid']).\
+                groupby(['cohortid', 'hid', 'val']).\
                 apply(lambda x : inf_durations(x)).\
                 dt.days.values
             age = df.\
-                groupby(['cohortid', 'hid']).\
+                groupby(['cohortid', 'hid', 'val']).\
                 apply(lambda x : get_age(x)).\
                 values
             age = age[~np.isnan(t)]
@@ -604,12 +604,15 @@ class Survival:
             t = t_end - t_start
 
             return t
-        def get_age(x):
+        def get_qpcr(x):
             """get final age of cohortid"""
             cid = x.cohortid.unique()[0]
             if self.in_boot:
                 cid = self.bootstrap_id_dates[cid]
-            return self.cid_ages[cid]
+            print(x)
+            if np.unique(x.val).size > 1:
+                sys.exit(x)
+            # return self.cid_ages[cid]
         def exp_likelihood_age(lam, vectors):
             """estimate likelihood as a function of age"""
             durations, ages = vectors
@@ -622,10 +625,10 @@ class Survival:
             self.study_start = df.date.min()
             self.study_end = df.date.max()
             t = df.\
-                groupby(['cohortid', 'hid']).\
+                groupby(['cohortid', 'hid', 'val']).\
                 apply(lambda x : inf_durations(x)).\
                 dt.days.values
-            print(t)
+            df.groupby(['cohortid', 'hid', 'val']).apply(lambda x : get_qpcr(x))
             # age = df.\
             #     groupby(['cohortid', 'hid']).\
             #     apply(lambda x : get_age(x)).\
