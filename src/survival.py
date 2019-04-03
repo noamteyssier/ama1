@@ -8,8 +8,9 @@ import sys, warnings, time
 from tqdm import tqdm
 
 from scipy.optimize import minimize
+from scipy.special import expit
 
-np.random.seed(42)
+# np.random.seed(43)
 sns.set(rc={'figure.figsize':(15, 12), 'lines.linewidth': 2})
 sns.set_style('ticks')
 
@@ -38,6 +39,7 @@ class Survival:
         self.__prepare_df__()
         self.__timeline__()
         self.__cid_dates__()
+        self.__cid_ages__()
         self.__mark_treatments__()
         self.__label_new_infections__()
         self.__bin_dates__()
@@ -67,7 +69,7 @@ class Survival:
             '< 5 years'  : 1,
             '5-15 years' : 2,
             '16 years or older' : 3}
-        self.meta = self.meta[['date', 'cohortid', 'qpcr', 'agecat', 'malariacat']]
+        self.meta = self.meta[['date', 'cohortid', 'qpcr', 'agecat', 'malariacat', 'ageyrs']]
         self.meta['date'] = self.meta['date'].astype('str')
         self.meta['cohortid'] = self.meta['cohortid'].astype('int')
         self.meta['agecat'] = self.meta.agecat.apply(lambda x : self.agecat_rename[x])
@@ -110,6 +112,12 @@ class Survival:
             drop_duplicates().\
             groupby('cohortid').\
             apply(lambda x : x.date.values)
+    def __cid_ages__(self):
+        """create a series indexed by cid for final age of that cid"""
+        self.cid_ages = self.pr2[['cohortid', 'date', 'ageyrs']].\
+            drop_duplicates().\
+            groupby(['cohortid']).\
+            apply(lambda x : x.tail(1).ageyrs)
     def __bin_dates__(self):
         """bin columns (dates) into 12 evenly spaced windows based on first and last visit"""
         dates = pd.to_datetime(self.infections.date.unique())
@@ -419,6 +427,7 @@ class Survival:
             plot_wane(omc)
     def Durations(self, bootstrap=False):
         """estimate durations using exponential model"""
+        self.in_boot = False
         def inf_durations(x):
             """only add minimum_duration if not treated and set hard burnin"""
             cid = x.cohortid.unique()[0]
@@ -487,6 +496,152 @@ class Survival:
         else:
             print("Fit Lambda : {}".format(lam))
             print("Expected Duration : {0} days".format(1 / lam))
+    def Duration_Age(self, bootstrap=False):
+        """fit exponential model as a function of age"""
+        self.in_boot=False
+        def inf_durations(x):
+            """only add minimum_duration if not treated and set hard burnin"""
+            cid = x.cohortid.unique()[0]
+            if self.in_boot:
+                cid = self.bootstrap_id_dates[cid]
+
+            burnout = pd.to_datetime(self.cid_dates[cid][-self.allowedSkips:]).min()
+            treatment = False
+
+            if x.date.max() <= self.burnin:
+                return np.nan
+            if x.date.max().to_datetime64() in self.treatments[cid]:
+                treatment = True
+
+            s_obs = ~np.any(x.date <= self.burnin)
+            e_obs = ~np.any(x.date >= burnout)
+
+
+            t_start = x.date.min() - self.minimum_duration if s_obs else self.burnin
+            t_end = x.date.max() if e_obs else self.study_end
+            t_end = t_end + self.minimum_duration if not treatment else t_end
+
+            t = t_end - t_start
+
+            return t
+        def get_age(x):
+            """get final age of cohortid"""
+            cid = x.cohortid.unique()[0]
+            if self.in_boot:
+                cid = self.bootstrap_id_dates[cid]
+            return self.cid_ages[cid]
+        def exp_likelihood_age(lam, vectors):
+            """estimate likelihood as a function of age"""
+            durations, ages = vectors
+            log_lambda = lam[0] + (lam[1] * ages)
+            lambdas = np.exp(log_lambda)
+            log_lik = log_lambda - (lambdas * durations)
+            return -1 * log_lik.sum()
+        def fit_model(df):
+            """fit model as a a function of age"""
+            self.study_start = df.date.min()
+            self.study_end = df.date.max()
+            t = df.\
+                groupby(['cohortid', 'hid']).\
+                apply(lambda x : inf_durations(x)).\
+                dt.days.values
+            age = df.\
+                groupby(['cohortid', 'hid']).\
+                apply(lambda x : get_age(x)).\
+                values
+            age = age[~np.isnan(t)]
+            t = t[~np.isnan(t)]
+
+            lam = np.random.random(2)
+            vectors = [t, age]
+            exp_likelihood_age(lam, vectors)
+            m = minimize(exp_likelihood_age, lam, vectors, method='Nelder-Mead')
+            return m
+
+        age_space = np.linspace(1,60,200)
+        om = fit_model(self.original_infections)
+        olam = np.exp(om.x[0] + (om.x[1] * age_space))
+        sns.lineplot(age_space , 1/olam)
+        if bootstrap:
+            self.in_boot=True
+            boots=[]
+            for i in tqdm(range(100)):
+                self.__bootstrap_cid__()
+                m = fit_model(self.infections)
+                lams = np.exp(m.x[0] + m.x[1] * age_space)
+                sns.lineplot(age_space, 1/lams, alpha = 0.3, legend=False, lw=0.5, color='grey')
+
+        plt.ylabel("Calculated Duration")
+        plt.xlabel("Age")
+        plt.title("Calculated Duration as a function of Age")
+        plt.savefig("../plots/survival/age_exponentialSurvival.pdf")
+        plt.show()
+        plt.close()
+    def Duration_qPCR(self, bootstrap=False):
+        self.in_boot=False
+        def inf_durations(x):
+            """only add minimum_duration if not treated and set hard burnin"""
+            cid = x.cohortid.unique()[0]
+            if self.in_boot:
+                cid = self.bootstrap_id_dates[cid]
+
+            burnout = pd.to_datetime(self.cid_dates[cid][-self.allowedSkips:]).min()
+            treatment = False
+
+            if x.date.max() <= self.burnin:
+                return np.nan
+            if x.date.max().to_datetime64() in self.treatments[cid]:
+                treatment = True
+
+            s_obs = ~np.any(x.date <= self.burnin)
+            e_obs = ~np.any(x.date >= burnout)
+
+
+            t_start = x.date.min() - self.minimum_duration if s_obs else self.burnin
+            t_end = x.date.max() if e_obs else self.study_end
+            t_end = t_end + self.minimum_duration if not treatment else t_end
+
+            t = t_end - t_start
+
+            return t
+        def get_age(x):
+            """get final age of cohortid"""
+            cid = x.cohortid.unique()[0]
+            if self.in_boot:
+                cid = self.bootstrap_id_dates[cid]
+            return self.cid_ages[cid]
+        def exp_likelihood_age(lam, vectors):
+            """estimate likelihood as a function of age"""
+            durations, ages = vectors
+            log_lambda = lam[0] + (lam[1] * ages)
+            lambdas = np.exp(log_lambda)
+            log_lik = log_lambda - (lambdas * durations)
+            return -1 * log_lik.sum()
+        def fit_model(df):
+            """fit model as a a function of age"""
+            self.study_start = df.date.min()
+            self.study_end = df.date.max()
+            t = df.\
+                groupby(['cohortid', 'hid']).\
+                apply(lambda x : inf_durations(x)).\
+                dt.days.values
+            print(t)
+            # age = df.\
+            #     groupby(['cohortid', 'hid']).\
+            #     apply(lambda x : get_age(x)).\
+            #     values
+            # age = age[~np.isnan(t)]
+            # t = t[~np.isnan(t)]
+            #
+            # lam = np.random.random(2)
+            # vectors = [t, age]
+            # exp_likelihood_age(lam, vectors)
+            # m = minimize(exp_likelihood_age, lam, vectors, method='Nelder-Mead')
+            # return m
+
+        fit_model(self.original_infections)
+
+
 def main():
     sdo_fn = "../prism2/full_prism2/filtered_5pc_10r.tab"
     meta_fn = "../prism2/stata/allVisits.dta"
@@ -499,7 +654,9 @@ def main():
     # s.OldNewSurvival(bootstrap=True)
     # s.CID_oldnewsurvival(bootstrap=True)
     # s.OldWaning(bootstrap=True)
-    s.Durations(bootstrap=True)
+    # s.Durations(bootstrap=True)
+    # s.Duration_Age(bootstrap=True)
+    s.Duration_qPCR(bootstrap=True)
 
 if __name__ == '__main__':
     main()
