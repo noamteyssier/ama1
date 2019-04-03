@@ -605,14 +605,19 @@ class Survival:
 
             return t
         def get_qpcr(x):
-            """get final age of cohortid"""
+            """get mean qpcr of cid~hid~inf"""
             cid = x.cohortid.unique()[0]
+            hid = x.hid.unique()[0]
+            dates = x.date.values
             if self.in_boot:
                 cid = self.bootstrap_id_dates[cid]
-            print(x)
-            if np.unique(x.val).size > 1:
+            qpcrs = self.pr2[
+                (self.pr2.cohortid == cid) & \
+                (self.pr2.h_popUID == hid) &
+                (self.pr2.date.isin(dates))].qpcr
+            qm = qpcrs.mean()
+            if qm == 0:
                 sys.exit(x)
-            # return self.cid_ages[cid]
         def exp_likelihood_age(lam, vectors):
             """estimate likelihood as a function of age"""
             durations, ages = vectors
@@ -628,14 +633,17 @@ class Survival:
                 groupby(['cohortid', 'hid', 'val']).\
                 apply(lambda x : inf_durations(x)).\
                 dt.days.values
-            df.groupby(['cohortid', 'hid', 'val']).apply(lambda x : get_qpcr(x))
-            # age = df.\
-            #     groupby(['cohortid', 'hid']).\
-            #     apply(lambda x : get_age(x)).\
-            #     values
-            # age = age[~np.isnan(t)]
-            # t = t[~np.isnan(t)]
-            #
+            qpcrs = df.\
+                groupby(['cohortid', 'hid', 'val']).\
+                apply(lambda x : get_qpcr(x)).\
+                values
+            print(t.size)
+            print(qpcrs.size)
+
+            qpcrs = qpcrs[~np.isnan(t)]
+            t = t[~np.isnan(t)]
+
+            print(qpcrs)
             # lam = np.random.random(2)
             # vectors = [t, age]
             # exp_likelihood_age(lam, vectors)
