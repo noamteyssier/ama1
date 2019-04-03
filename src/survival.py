@@ -472,7 +472,7 @@ class Survival:
             t = t[~np.isnan(t)]
             while True:
                 lam = np.random.random()
-                m = minimize(exp_likelihood, lam, t, method='SLSQP', bounds=((0, 1), ))
+                m = minimize(exp_likelihood, lam, t, method='TNC', bounds=((0, 1), ))
                 if m.success:
                     break
             return m.x
@@ -501,7 +501,6 @@ class Survival:
         else:
             print("Fit Lambda : {}".format(lam))
             print("Expected Duration : {0} days".format(1 / lam))
-
 def main():
     sdo_fn = "../prism2/full_prism2/filtered_5pc_10r.tab"
     meta_fn = "../prism2/stata/allVisits.dta"
