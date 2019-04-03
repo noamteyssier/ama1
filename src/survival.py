@@ -420,20 +420,6 @@ class Survival:
     def Durations(self, bootstrap=False):
         """estimate durations using exponential model"""
         def inf_durations(x):
-            cid = x.cohortid.unique()[0]
-            burnout = pd.to_datetime(self.cid_dates[cid][-self.allowedSkips:]).min()
-
-            s_obs = ~np.any(x.date <= self.burnin)
-            e_obs = ~np.any(x.date >= burnout)
-
-
-            t_start = x.date.min() - self.minimum_duration if s_obs else self.study_start
-            t_end = x.date.max() + self.minimum_duration if e_obs else self.study_end
-
-            t = t_end - t_start
-
-            return t
-        def conditional_inf_durations(x):
             """only add minimum_duration if not treated and set hard burnin"""
             cid = x.cohortid.unique()[0]
             if self.in_boot:
@@ -467,7 +453,7 @@ class Survival:
             self.study_end = df.date.max()
             t = df.\
                 groupby(['cohortid', 'hid']).\
-                apply(lambda x : conditional_inf_durations(x)).\
+                apply(lambda x : inf_durations(x)).\
                 dt.days.values
             t = t[~np.isnan(t)]
             while True:
