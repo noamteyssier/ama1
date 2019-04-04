@@ -61,8 +61,6 @@ class Survival:
         # filter all positive qpcr dates with failed sequencing
         if self.fail_flag:
             self.pr2 = self.pr2[~((self.pr2.qpcr > 0) & np.isnan(self.pr2.c_AveragedFrac))]
-
-        self.pr2.date = pd.to_datetime(self.pr2.date)
     def __prepare_meta__(self):
         """prepare meta data for usage in timeline generation"""
         self.agecat_rename = {
@@ -70,7 +68,7 @@ class Survival:
             '5-15 years' : 2,
             '16 years or older' : 3}
         self.meta = self.meta[['date', 'cohortid', 'qpcr', 'agecat', 'malariacat', 'ageyrs']]
-        self.meta['date'] = self.meta['date'].astype('str')
+        self.meta['date'] = pd.to_datetime(self.meta['date'])
         self.meta['cohortid'] = self.meta['cohortid'].astype('int')
         self.meta['agecat'] = self.meta.agecat.apply(lambda x : self.agecat_rename[x])
         self.meta.sort_values(by='date', inplace=True)
@@ -90,6 +88,7 @@ class Survival:
             axis = 1, result_type = 'expand')
 
         self.sdo['cohortid'] = self.sdo.cohortid.astype('int')
+        self.sdo['date'] = pd.to_datetime(self.sdo.date)
 
         # select columns of interest
         self.sdo = self.sdo[['cohortid', 'date', 'h_popUID', 'c_AveragedFrac']]
@@ -618,21 +617,23 @@ class Survival:
             cid = x.cohortid.unique()[0]
             hid = x.hid.unique()[0]
             dates = x.date.values
+
             if self.in_boot:
                 cid = self.bootstrap_id_dates[cid]
-            qpcrs = self.pr2[
-                (self.pr2.cohortid == cid) & \
-                (self.pr2.h_popUID == hid) &
-                (self.pr2.date.isin(dates))].qpcr
+            qpcrs = self.meta[
+                (self.meta.cohortid == cid) &
+                (self.meta.date.isin(dates))].qpcr
+
             qm = qpcrs.mean()
             if qm == 0:
-                sys.exit(x)
+                qm += 1e-6
+            return np.log(qm)
         def exp_likelihood_age(lam, vectors):
             """estimate likelihood as a function of age"""
-            durations, ages = vectors
-            log_lambda = lam[0] + (lam[1] * ages)
+            durations, qpcr = vectors
+            log_lambda = lam[0] + (lam[1] * qpcr)
             lambdas = np.exp(log_lambda)
-            log_lik = log_lambda - (lambdas * durations)
+            log_lik = log_lambda + (-lambdas * durations)
             return -1 * log_lik.sum()
         def fit_model(df):
             """fit model as a a function of age"""
@@ -646,20 +647,46 @@ class Survival:
                 groupby(['cohortid', 'hid', 'val']).\
                 apply(lambda x : get_qpcr(x)).\
                 values
-            print(t.size)
-            print(qpcrs.size)
 
             qpcrs = qpcrs[~np.isnan(t)]
             t = t[~np.isnan(t)]
 
-            print(qpcrs)
-            # lam = np.random.random(2)
-            # vectors = [t, age]
-            # exp_likelihood_age(lam, vectors)
-            # m = minimize(exp_likelihood_age, lam, vectors, method='Nelder-Mead')
-            # return m
+            lam = np.random.random(2)
+            vectors = [t, qpcrs]
+            e = exp_likelihood_age(lam, vectors)
+            m = minimize(exp_likelihood_age, lam, vectors, method='Nelder-Mead')
+            return m
+        def print_coefficients(om, boots):
+            boots = np.array(boots)
+            CI = np.percentile(boots, [2.5, 97.5], axis=0).T
 
-        fit_model(self.original_infections)
+            print('Calculated Coeffecients : ')
+            for i in range(om.x.size):
+                print('    l{:d} : {:.5f} ({:.5f} : {:.5f})'.format(i, om.x[i], CI[i][0], CI[i][1]))
+
+
+        qpcr_space = np.linspace(0.1,10, 200)
+        om = fit_model(self.original_infections)
+        print(om)
+        olam = np.exp(om.x[0] + (om.x[1] * qpcr_space))
+        sns.lineplot(qpcr_space , 1/olam)
+        if bootstrap:
+            self.in_boot=True
+            boots = []
+            for i in tqdm(range(100), desc='bootstrapping'):
+                self.__bootstrap_cid__()
+                m = fit_model(self.infections)
+                lams = np.exp(m.x[0] + (m.x[1] * qpcr_space))
+                sns.lineplot(qpcr_space, 1/lams, alpha = 0.3, legend=False, lw=0.5, color='grey')
+                boots.append(m.x)
+            print_coefficients(om, boots)
+
+        plt.ylabel("Calculated Duration")
+        plt.xlabel("QPCR (log)")
+        plt.title("Calculated Duration as a function of QPCR")
+        plt.savefig("../plots/survival/qpcr_exponentialSurvival.pdf")
+        plt.show()
+        plt.close()
 
 
 def main():
@@ -671,12 +698,12 @@ def main():
 
     # calculate Expected and Observed for skip vals in range
     s = Survival(sdo, meta, fail_flag=False, qpcr_threshold=0)
-    # s.OldNewSurvival(bootstrap=True)
-    # s.CID_oldnewsurvival(bootstrap=True)
-    # s.OldWaning(bootstrap=True)
-    # s.Durations(bootstrap=True)
+    s.OldNewSurvival(bootstrap=True)
+    s.CID_oldnewsurvival(bootstrap=True)
+    s.OldWaning(bootstrap=True)
+    s.Durations(bootstrap=True)
     s.Duration_Age(bootstrap=True)
-    # s.Duration_qPCR(bootstrap=True)
+    s.Duration_qPCR(bootstrap=True)
 
 if __name__ == '__main__':
     main()
