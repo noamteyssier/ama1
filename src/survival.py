@@ -557,6 +557,13 @@ class Survival:
             exp_likelihood_age(lam, vectors)
             m = minimize(exp_likelihood_age, lam, vectors, method='Nelder-Mead')
             return m
+        def print_coefficients(om, boots):
+            boots = np.array(boots)
+            CI = np.percentile(boots, [2.5, 97.5], axis=0).T
+
+            print('Calculated Coeffecients : ')
+            for i in range(om.x.size):
+                print('    l{:d} : {:.5f} ({:.5f} : {:.5f})'.format(i, om.x[i], CI[i][0], CI[i][1]))
 
         age_space = np.linspace(1,60,200)
         om = fit_model(self.original_infections)
@@ -565,11 +572,13 @@ class Survival:
         if bootstrap:
             self.in_boot=True
             boots=[]
-            for i in tqdm(range(100)):
+            for i in tqdm(range(200)):
                 self.__bootstrap_cid__()
                 m = fit_model(self.infections)
+                boots.append(m.x)
                 lams = np.exp(m.x[0] + m.x[1] * age_space)
                 sns.lineplot(age_space, 1/lams, alpha = 0.3, legend=False, lw=0.5, color='grey')
+            print_coefficients(om, boots)
 
         plt.ylabel("Calculated Duration")
         plt.xlabel("Age")
@@ -666,8 +675,8 @@ def main():
     # s.CID_oldnewsurvival(bootstrap=True)
     # s.OldWaning(bootstrap=True)
     # s.Durations(bootstrap=True)
-    # s.Duration_Age(bootstrap=True)
-    s.Duration_qPCR(bootstrap=True)
+    s.Duration_Age(bootstrap=True)
+    # s.Duration_qPCR(bootstrap=True)
 
 if __name__ == '__main__':
     main()
