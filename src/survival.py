@@ -690,8 +690,8 @@ class Survival:
 
 
 def main():
-    sdo_fn = "../prism2/full_prism2/filtered_5pc_10r.tab"
-    meta_fn = "../prism2/stata/allVisits.dta"
+    sdo_fn = "../prism2/full_prism2/final_filter.tab"
+    meta_fn = "../prism2/stata/filtered_visits.dta"
 
     sdo = pd.read_csv(sdo_fn, sep='\t')
     meta = pd.read_stata(meta_fn)

@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 
 from itertools import combinations
 from scipy.spatial.distance import squareform, pdist
+from scipy.stats import percentileofscore
 from numpy.random import shuffle
 from geopy.distance import distance
 from tqdm import tqdm
@@ -210,6 +211,7 @@ def pooled_v_average(sdo, meta):
     lower, higher = np.quantile(permutations, [0.025, 1 - 0.025]) / b
     print("CI : {0} - {1}".format(lower, higher))
     print("calculated H : {0}".format(ra/b))
+    print("Percentile of H : {}".format(percentileofscore(permutations, ra/b)))
 
     # plotting
     g = sns.distplot(permutations/b, color='teal', label = 'Permuted Data')
@@ -246,8 +248,8 @@ def time_analysis(sdo, meta):
 
 
 def main():
-    fn_sdo = '../prism2/full_prism2/filtered_5pc_10r.tab'
-    fn_meta = '../prism2/stata/allVisits.dta'
+    fn_sdo = '../prism2/full_prism2/final_filter.tab'
+    fn_meta = '../prism2/stata/filtered_visits.dta'
     fn_gps = '../prism2/stata/PRISM_GPS.csv'
     sc = SpatialClustering(fn_sdo, fn_meta, fn_gps)
 
@@ -268,7 +270,6 @@ def main():
 
     # Show difference in pooling vs mean method for permutations with data
     pooled_v_average(fn_sdo, fn_meta)
-
 
 
 

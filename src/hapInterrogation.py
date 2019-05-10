@@ -13,10 +13,10 @@ import os
 def get_args():
     p = argparse.ArgumentParser()
     p.add_argument('-i', '--seekdeep_output', required=False,
-        default="../prism2/full_prism2/filtered_5pc_10r.tab",
+        default="../prism2/full_prism2/final_filter.tab",
         help="SeekDeep Output to use as input to functions")
     p.add_argument('-m', '--meta', required=False,
-        default= "../prism2/stata/allVisits.dta",
+        default= "../prism2/stata/filtered_visits.dta",
         help="Cohort Meta information (stata13) to relate cohortids")
     p.add_argument('-a', '--allele_frequency', action='store_true',
         help="Calculate allele frequencies of haplotypes in the population")
