@@ -34,12 +34,14 @@ def get_args():
 def main():
     args = get_args()
     h = HaplotypeUtils(
-        dist = args.dist_fn,
-        sdo = args.sdo_fn,
-        meta = args.meta_fn)
+        args.dist_fn,
+        args.sdo_fn,
+        args.meta_fn)
 
     if args.filter:
-        h.FilterOOSSP(ratio = args.ratio, pc = args.percent)
+        h.FilterOOSSP(
+            ratio = args.ratio,
+            pc = args.percent)
         return 1
 
     if args.plot_graph:

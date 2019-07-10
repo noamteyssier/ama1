@@ -25,6 +25,7 @@ class HaplotypeUtils:
 
         self.__load_dist__()
         self.__load_sdo__()
+        self.__load_meta__()
     def __load_dist__(self):
         """read in filename for snp distances into dataframe"""
         self.dist = pd.read_csv(self.dist_fn, sep="\t").\
@@ -239,7 +240,7 @@ class HaplotypeUtils:
         return '5'
     def __normalize_sdo_features__(self, df):
         """normalize seek deep output after applying a filter"""
-        sdu = SeekDeepUtils()
+        sdu = SeekDeepUtils(self.sdo)
         return sdu.fix_filtered_SDO(df)
     def FindOneOff(self):
         """return dataframe of all haplotypes one snp off from each other"""
@@ -342,7 +343,7 @@ class HaplotypeUtils:
 class SeekDeepUtils:
     """class for various utilities related to SeekDeep output"""
     pd.set_option('mode.chained_assignment', None) # remove settingwithcopywarning
-    def __init__(self, sdo, meta, fail_flag=True, qpcr_threshold = 0):
+    def __init__(self, sdo, meta=None, fail_flag=True, qpcr_threshold = 0):
         self.sdo = sdo
         self.meta = meta
 
@@ -354,6 +355,8 @@ class SeekDeepUtils:
         self.__prepare_pr2__()
     def __prepare_pr2__(self):
         self.__prepare_sdo__()
+        if not self.meta:
+            return -1
         self.__prepare_meta__()
 
         # filter qpcr dates
