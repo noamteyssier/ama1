@@ -355,7 +355,7 @@ class SeekDeepUtils:
         self.__prepare_pr2__()
     def __prepare_pr2__(self):
         self.__prepare_sdo__()
-        if type(self.meta) == 'NoneType':
+        if type(self.meta) != pd.core.frame.DataFrame:
             return -1
         self.__prepare_meta__()
 
