@@ -687,8 +687,6 @@ class Survival:
         plt.savefig("../plots/survival/qpcr_exponentialSurvival.pdf")
         plt.show()
         plt.close()
-
-
 def main():
     sdo_fn = "../prism2/full_prism2/final_filter.tab"
     meta_fn = "../prism2/stata/filtered_visits.dta"
