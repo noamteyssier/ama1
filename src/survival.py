@@ -120,15 +120,22 @@ class Survival:
     def __bin_dates__(self):
         """bin columns (dates) into 12 evenly spaced windows based on first and last visit"""
         dates = pd.to_datetime(self.infections.date.unique())
-        self.date_bins = pd.date_range(dates.min(), dates.max(), periods=13)
+        self.date_bins = pd.date_range(
+            dates.min(),
+            dates.max(),
+            periods=13
+        )
 
-        dfs = []
-        for i in range(1, self.date_bins.size):
-            a = np.where((dates < self.date_bins[i]) & (dates >= self.date_bins[i-1]))[0]
-            p = pd.DataFrame({'date_bin' : self.date_bins[i], 'date' : dates[a]})
-            dfs.append(p)
+        # merge everything before january 1 2018
+        self.date_bins = np.delete(self.date_bins, 1)
 
-        self.date_bins = pd.concat(dfs)
+        date_bins = []
+        for d in dates:
+            assigned_bin = self.date_bins[np.where(self.date_bins <= d)[0].max()]
+            date_bins.append(assigned_bin)
+
+        self.date_bins = pd.DataFrame({'date_bin' : date_bins, 'date' : dates})
+
         self.infections = self.infections.\
             merge(self.date_bins)
     def __mark_treatments__(self):
