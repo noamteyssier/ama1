@@ -6,8 +6,8 @@ library(ggraph)
 setwd("~/bin/ama1/prism2")
 
 
-cohort_meta <- read.dta13("stata/allVisits.dta")
-seekdeep <- read_tsv("full_prism2/filtered_5pc_10r.tab")
+cohort_meta <- read.dta13("stata/filtered_visits.dta")
+seekdeep <- read_tsv("full_prism2/pfama1_sampInfo.tab.txt")
 vcf <- read_tsv("full_prism2/pfama1.vcf", skip = 3)
 snpdist <- read_tsv("full_prism2/pfama1.dist")
 snpdb <- read_tsv("data/ama1_snpInfo.db.tab")
