@@ -11,7 +11,7 @@ def get_args():
         help = 'Distance matrix of snps to use to calculate one-offs (snp-dists output)')
     p.add_argument('-m', '--meta_fn', default= '../prism2/stata/allVisits.dta',
         help = 'cohort meta data to use for qpcr colouring (only required for plot : density)')
-    p.add_argument('-f', '--filter', action='store_true',
+    p.add_argument('-f', '--filter', action='store_true', default=True,
         help = 'perform filter and return filtered dataframe (mutually exclusive with -g flag)')
     p.add_argument('-r', '--ratio', default=50, type=float,
         help= 'ratio of majority haplotype over minority to apply filter')
@@ -27,8 +27,7 @@ def get_args():
         sys.exit(1)
 
     if args.filter and args.plot_graph:
-        sys.exit('Error : Please choose to filter OR to visualize')
-
+        args.filter = False
 
     return args
 def main():
