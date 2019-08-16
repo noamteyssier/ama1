@@ -709,7 +709,7 @@ class SeekDeepUtils:
             tail(1)[['cohortid', 'agecat']]
 
         self.sdo = self.sdo.merge(self.age_categories, how='left')
-    def __foi_exposure__(self, meta, agecat=False):
+    def __foi_exposure__(self, meta, agecat=False, month=False):
         """calculate exposure for a given sdo dataframe"""
         if agecat:
             exposure = self.age_categories.\
@@ -750,7 +750,7 @@ class SeekDeepUtils:
             rename(columns = {'person_infection' : 'infection_event'})
     def __foi_cid_duration_from_first_visit__(self):
         """find duration of each cid from first visit to last visit in years"""
-        
+
         first_visits = self.meta[self.meta.date >= self.meta.burnin].\
             groupby('cohortid').\
             head(1)[['cohortid', 'date']].\
@@ -843,10 +843,14 @@ class SeekDeepUtils:
                 }).\
             reset_index()
 
+        # get exposure by group
+        monthly_infections['exposure'] = monthly_infections.apply(
+            lambda x : self.meta[self.meta.burnin <= x.ym.to_timestamp()].cohortid.unique().size,
+            axis=1)
+
         # calculate FOI
-        monthly_infections['exposure'] = self.__foi_exposure__(self.meta)
         monthly_infections['foi'] = monthly_infections.apply(
-            lambda x : x.infection_event / (x.date * x.exposure),
+            lambda x : x.infection_event / (x.date * x.exposure) if x.exposure > 0 else 0,
             axis=1)
         return monthly_infections
     def __foi_method_person__(self, individual=False):
