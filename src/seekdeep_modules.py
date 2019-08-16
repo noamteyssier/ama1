@@ -343,7 +343,7 @@ class HaplotypeUtils:
 class SeekDeepUtils:
     """class for various utilities related to SeekDeep output"""
     pd.set_option('mode.chained_assignment', None) # remove settingwithcopywarning
-    def __init__(self, sdo, meta=None, fail_flag=True, qpcr_threshold = 0):
+    def __init__(self, sdo, meta=None, fail_flag=True, qpcr_threshold = 0, burnin=3):
         self.sdo = sdo
         self.meta = meta
 
@@ -351,7 +351,7 @@ class SeekDeepUtils:
         self.qpcr_threshold = qpcr_threshold
         # boolean controlling whether to drop failed sequencing samples
         self.fail_flag = fail_flag
-        self.burnin = 3 # in months
+        self.burnin = burnin
 
         self.__prepare_pr2__()
     def __prepare_pr2__(self):
@@ -892,10 +892,14 @@ class SeekDeepUtils:
 
         return cid_infections
     def __label_haplotype_infection_type__(self, group):
-        """for each new infection past the burnin assign all following haplotype events as new infections"""
+        """
+        for each new infection past the burnin :
+        assign all following haplotype events as new infections
+        """
         # find infection events past the burnin
+
         group['true_new'] = group.apply(
-            lambda x : True if (x.infection_event > 0) & (x.date >= x.burnin) else False,
+            lambda x : (x.infection_event) & (x.date >= x.burnin),
             axis = 1)
 
         # find if there are any new infections past the burnin

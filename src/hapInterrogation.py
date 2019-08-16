@@ -34,8 +34,8 @@ def get_args():
         help="Number of allowed skips to allow during calculation of durations (default = 3 skips)")
     p.add_argument('-x', '--default_duration', default=15, type=int,
         help="Default duration rate to use for single event infections (default = 15 days)")
-    p.add_argument('-b', '--burnin', default='2018-01-01', type=str,
-        help="Date to begin considering new infections (YYYY-MM-DD)")
+    p.add_argument('-b', '--burnin', default=3, type=int,
+        help="Number of months to consider a patient in burnin period (default = 3 months)")
     p.add_argument('-t', '--qpcr_threshold', default=0.1, type=float,
         help="qpcr threshold to consider a sample (set to 0 for no threshold)")
     p.add_argument('-q', '--fail_flag', action='store_false', default=True,
@@ -62,7 +62,9 @@ def main():
         sdo = sdo,
         meta = meta,
         fail_flag=args.fail_flag,
-        qpcr_threshold=args.qpcr_threshold)
+        qpcr_threshold=args.qpcr_threshold,
+        burnin=args.burnin
+        )
 
     # calculate allele frequency
     if args.allele_frequency:
