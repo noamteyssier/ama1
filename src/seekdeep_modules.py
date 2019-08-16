@@ -351,6 +351,7 @@ class SeekDeepUtils:
         self.qpcr_threshold = qpcr_threshold
         # boolean controlling whether to drop failed sequencing samples
         self.fail_flag = fail_flag
+        self.burnin = 3 # in months
 
         self.__prepare_pr2__()
     def __prepare_pr2__(self):
@@ -373,8 +374,9 @@ class SeekDeepUtils:
         self.pr2['h_fraction'] = self.pr2.qpcr * self.pr2.c_AveragedFrac
     def __prepare_meta__(self):
         """prepare meta data for usage in timeline generation"""
-        self.meta = self.meta[['date', 'cohortid', 'qpcr', 'agecat']]
+        self.meta = self.meta[['date', 'cohortid', 'qpcr', 'agecat', 'enrolldate']]
         self.meta['date'] = pd.to_datetime(self.meta['date'])
+        self.meta['enrolldate'] = pd.to_datetime(self.meta['enrolldate'])
         self.meta['cohortid'] = self.meta['cohortid'].astype('int')
         self.meta.sort_values(by='date', inplace=True)
         self.meta = self.meta[~self.meta.qpcr.isna()]
@@ -888,6 +890,19 @@ class SeekDeepUtils:
             group.iloc[true_news.min():, -1] = True
 
         return group
+    def FindCIDBurnin(self, month_offset=3):
+        """find burnin period for all cohortids given a month offset"""
+        # get enrolldate by cid
+        cid_enroll = self.pr2.\
+            groupby('cohortid').\
+            apply(lambda x : x.enrolldate.min()).\
+            reset_index().\
+            rename(columns={0 : 'enrolldate'})
+        # shift by burnin
+        cid_burnin = cid_enroll.\
+            apply(lambda x: x['enrolldate'] + pd.DateOffset(months = month_offset), axis=1)
+        cid_burnin.index = cid_enroll.cohortid
+        return cid_burnin
     def fix_filtered_SDO(self, sdo):
         """recalculates attributes of SeekDeep output dataframe post-filtering"""
         self.sdo = sdo
@@ -949,10 +964,11 @@ class SeekDeepUtils:
         return self.durations
     def Old_New_Infection_Labels(self, controls=False, allowedSkips = 3, default=15, burnin='2018-01-01'):
         """labels cid~hid infections that developed past a burn-in date as new else old"""
-        self.burnin = pd.to_datetime(burnin)
-        self.__prepare_skips__()
+        # self.burnin = pd.to_datetime(burnin)
+        self.cid_burnin = self.FindCIDBurnin(month_offset=3)
+        self.skip_df = self.__prepare_skips__()
         self.__label_new_infections__(allowedSkips)
-
+        sys.exit()
 
         hit_labels = self.skip_df.\
             groupby(['cohortid', 'h_popUID']).\
