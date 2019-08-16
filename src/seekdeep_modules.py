@@ -538,7 +538,7 @@ class SeekDeepUtils:
     def __infection_labeller__(self, row, allowedSkips):
         """label infections as true or false"""
         # visits before burnin are false
-        if row.date <= self.burnin:
+        if row.date <= row.burnin:
             return False
         # first infection occurs at a timepoint past the allowed skips
         elif row.skips > allowedSkips :
@@ -560,6 +560,9 @@ class SeekDeepUtils:
         # merge with visit number
         self.skip_df = self.skip_df.merge(
             meta[['cohortid', 'date', 'visit_num']], how = 'left')
+
+        # merge with cohortid burnin
+        self.skip_df = self.skip_df.merge(self.cid_burnin, how='left')
 
         # label infection event
         self.skip_df['infection_event'] = self.skip_df.apply(
@@ -814,7 +817,7 @@ class SeekDeepUtils:
         groupby_columns = ['ym']
 
         # apply burnin to sdo
-        self.sdo = self.sdo[self.sdo.date >= self.burnin]
+        self.sdo = self.sdo[self.sdo.date >= self.sdo.burnin]
 
         # collapse all clones to a single infection event at a date
         if individual == True:
@@ -879,7 +882,7 @@ class SeekDeepUtils:
         """for each new infection past the burnin assign all following haplotype events as new infections"""
         # find infection events past the burnin
         group['true_new'] = group.apply(
-            lambda x : True if (x.infection_event > 0) & (x.date >= self.burnin) else False,
+            lambda x : True if (x.infection_event > 0) & (x.date >= x.burnin) else False,
             axis = 1)
 
         # find if there are any new infections past the burnin
@@ -893,15 +896,14 @@ class SeekDeepUtils:
     def FindCIDBurnin(self, month_offset=3):
         """find burnin period for all cohortids given a month offset"""
         # get enrolldate by cid
-        cid_enroll = self.pr2.\
+        cid_burnin = self.pr2.\
             groupby('cohortid').\
             apply(lambda x : x.enrolldate.min()).\
             reset_index().\
             rename(columns={0 : 'enrolldate'})
         # shift by burnin
-        cid_burnin = cid_enroll.\
+        cid_burnin['burnin'] = cid_burnin.\
             apply(lambda x: x['enrolldate'] + pd.DateOffset(months = month_offset), axis=1)
-        cid_burnin.index = cid_enroll.cohortid
         return cid_burnin
     def fix_filtered_SDO(self, sdo):
         """recalculates attributes of SeekDeep output dataframe post-filtering"""
@@ -968,7 +970,6 @@ class SeekDeepUtils:
         self.cid_burnin = self.FindCIDBurnin(month_offset=3)
         self.skip_df = self.__prepare_skips__()
         self.__label_new_infections__(allowedSkips)
-        sys.exit()
 
         hit_labels = self.skip_df.\
             groupby(['cohortid', 'h_popUID']).\
@@ -977,14 +978,16 @@ class SeekDeepUtils:
         return hit_labels
     def New_Infections(self, controls=False, allowedSkips = 3, burnin='2018-01-01'):
         """calculates number of new infections for each haplotype in each cohortid with allowed skips"""
-        self.burnin = pd.to_datetime(burnin)
+        # self.burnin = pd.to_datetime(burnin)
+        self.cid_burnin = self.FindCIDBurnin(month_offset=3)
         self.__prepare_skips__()
         self.__label_new_infections__(allowedSkips)
 
         return self.skip_df
     def Force_of_Infection(self, controls=False, foi_method = 'all', allowedSkips = 3, default=15, burnin = '2018-01-01'):
         """calculate force of infection for a dataset"""
-        self.burnin = pd.to_datetime(burnin)
+        # self.burnin = pd.to_datetime(burnin)
+        self.cid_burnin = self.FindCIDBurnin(month_offset=3)
         self.__prepare_skips__()
         self.__label_new_infections__(allowedSkips)
         self.sdo = self.sdo.merge(self.skip_df, how='left')
