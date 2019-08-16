@@ -843,10 +843,19 @@ class SeekDeepUtils:
                 }).\
             reset_index()
 
+
         # get exposure by group
-        monthly_infections['exposure'] = monthly_infections.apply(
-            lambda x : self.meta[self.meta.burnin <= x.ym.to_timestamp()].cohortid.unique().size,
-            axis=1)
+        if not agecat:
+            monthly_infections['exposure'] = monthly_infections.apply(
+                lambda x : self.meta[self.meta.burnin <= x.ym.to_timestamp() + pd.offsets.Day(28)].cohortid.unique().size,
+                axis=1)
+        else:
+            monthly_infections['exposure'] = monthly_infections.apply(
+                lambda x : self.meta[
+                    (self.meta.agecat == x.agecat) &
+                    (self.meta.burnin <= x.ym.to_timestamp() + pd.offsets.Day(28))
+                    ].cohortid.unique().size,
+                axis=1)
 
         # calculate FOI
         monthly_infections['foi'] = monthly_infections.apply(
