@@ -750,8 +750,8 @@ class SeekDeepUtils:
             rename(columns = {'person_infection' : 'infection_event'})
     def __foi_cid_duration_from_first_visit__(self):
         """find duration of each cid from first visit to last visit in years"""
-
-        first_visits = self.meta[self.meta.date >= self.burnin].\
+        
+        first_visits = self.meta[self.meta.date >= self.meta.burnin].\
             groupby('cohortid').\
             head(1)[['cohortid', 'date']].\
             rename(columns = {'date' : 'first_visit'})
@@ -779,7 +779,7 @@ class SeekDeepUtils:
         """calculate force of infection over the entire dataset"""
 
         # apply burnin to sdo
-        self.sdo = self.sdo[self.sdo.date >= self.burnin]
+        self.sdo = self.sdo[self.sdo.date >= self.sdo.burnin]
 
         if individual == True:
             self.__foi_collapse_infection_by_person__()
@@ -853,7 +853,7 @@ class SeekDeepUtils:
         """calculate force of infection for each person"""
 
         # apply burn in to dataframe
-        self.sdo = self.sdo[self.sdo.date >= self.burnin]
+        self.sdo = self.sdo[self.sdo.date >= self.sdo.burnin]
 
         # calculate infections with collapsed haplotype infection events
         if individual == True:
@@ -904,6 +904,9 @@ class SeekDeepUtils:
         # shift by burnin
         cid_burnin['burnin'] = cid_burnin.\
             apply(lambda x: x['enrolldate'] + pd.DateOffset(months = month_offset), axis=1)
+        self.meta['burnin'] = self.meta.\
+            apply(lambda x: x['enrolldate'] + pd.DateOffset(months = month_offset), axis=1)
+
         return cid_burnin
     def fix_filtered_SDO(self, sdo):
         """recalculates attributes of SeekDeep output dataframe post-filtering"""
