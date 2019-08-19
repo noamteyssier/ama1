@@ -920,9 +920,9 @@ class SeekDeepUtils:
             rename(columns={0 : 'enrolldate'})
         # shift by burnin
         cid_burnin['burnin'] = cid_burnin.\
-            apply(lambda x: x['enrolldate'] + pd.DateOffset(months = month_offset), axis=1)
+            apply(lambda x: x['enrolldate'] + pd.DateOffset(months = self.burnin), axis=1)
         self.meta['burnin'] = self.meta.\
-            apply(lambda x: x['enrolldate'] + pd.DateOffset(months = month_offset), axis=1)
+            apply(lambda x: x['enrolldate'] + pd.DateOffset(months = self.burnin), axis=1)
 
         return cid_burnin
     def fix_filtered_SDO(self, sdo):
@@ -1004,10 +1004,10 @@ class SeekDeepUtils:
         self.__label_new_infections__(allowedSkips)
 
         return self.skip_df
-    def Force_of_Infection(self, controls=False, foi_method = 'all', allowedSkips = 3, default=15, burnin = '2018-01-01'):
+    def Force_of_Infection(self, controls=False, foi_method = 'all', allowedSkips = 3, default=15, burnin=3):
         """calculate force of infection for a dataset"""
-        # self.burnin = pd.to_datetime(burnin)
-        self.cid_burnin = self.FindCIDBurnin(month_offset=3)
+        self.burnin = burnin
+        self.cid_burnin = self.FindCIDBurnin(self.burnin)
         self.__prepare_skips__()
         self.__label_new_infections__(allowedSkips)
         self.sdo = self.sdo.merge(self.skip_df, how='left')
