@@ -343,7 +343,7 @@ class HaplotypeUtils:
 class SeekDeepUtils:
     """class for various utilities related to SeekDeep output"""
     pd.set_option('mode.chained_assignment', None) # remove settingwithcopywarning
-    def __init__(self, sdo, meta=None, fail_flag=True, qpcr_threshold = 0):
+    def __init__(self, sdo, meta=None, fail_flag=True, qpcr_threshold = 0, burnin=3):
         self.sdo = sdo
         self.meta = meta
 
@@ -351,6 +351,7 @@ class SeekDeepUtils:
         self.qpcr_threshold = qpcr_threshold
         # boolean controlling whether to drop failed sequencing samples
         self.fail_flag = fail_flag
+        self.burnin = burnin
 
         self.__prepare_pr2__()
     def __prepare_pr2__(self):
@@ -373,8 +374,9 @@ class SeekDeepUtils:
         self.pr2['h_fraction'] = self.pr2.qpcr * self.pr2.c_AveragedFrac
     def __prepare_meta__(self):
         """prepare meta data for usage in timeline generation"""
-        self.meta = self.meta[['date', 'cohortid', 'qpcr', 'agecat']]
+        self.meta = self.meta[['date', 'cohortid', 'qpcr', 'agecat', 'enrolldate']]
         self.meta['date'] = pd.to_datetime(self.meta['date'])
+        self.meta['enrolldate'] = pd.to_datetime(self.meta['enrolldate'])
         self.meta['cohortid'] = self.meta['cohortid'].astype('int')
         self.meta.sort_values(by='date', inplace=True)
         self.meta = self.meta[~self.meta.qpcr.isna()]
@@ -536,7 +538,7 @@ class SeekDeepUtils:
     def __infection_labeller__(self, row, allowedSkips):
         """label infections as true or false"""
         # visits before burnin are false
-        if row.date <= self.burnin:
+        if row.date <= row.burnin:
             return False
         # first infection occurs at a timepoint past the allowed skips
         elif row.skips > allowedSkips :
@@ -558,6 +560,9 @@ class SeekDeepUtils:
         # merge with visit number
         self.skip_df = self.skip_df.merge(
             meta[['cohortid', 'date', 'visit_num']], how = 'left')
+
+        # merge with cohortid burnin
+        self.skip_df = self.skip_df.merge(self.cid_burnin, how='left')
 
         # label infection event
         self.skip_df['infection_event'] = self.skip_df.apply(
@@ -704,7 +709,7 @@ class SeekDeepUtils:
             tail(1)[['cohortid', 'agecat']]
 
         self.sdo = self.sdo.merge(self.age_categories, how='left')
-    def __foi_exposure__(self, meta, agecat=False):
+    def __foi_exposure__(self, meta, agecat=False, month=False):
         """calculate exposure for a given sdo dataframe"""
         if agecat:
             exposure = self.age_categories.\
@@ -746,7 +751,7 @@ class SeekDeepUtils:
     def __foi_cid_duration_from_first_visit__(self):
         """find duration of each cid from first visit to last visit in years"""
 
-        first_visits = self.meta[self.meta.date >= self.burnin].\
+        first_visits = self.meta[self.meta.date >= self.meta.burnin].\
             groupby('cohortid').\
             head(1)[['cohortid', 'date']].\
             rename(columns = {'date' : 'first_visit'})
@@ -774,7 +779,7 @@ class SeekDeepUtils:
         """calculate force of infection over the entire dataset"""
 
         # apply burnin to sdo
-        self.sdo = self.sdo[self.sdo.date >= self.burnin]
+        self.sdo = self.sdo[self.sdo.date >= self.sdo.burnin]
 
         if individual == True:
             self.__foi_collapse_infection_by_person__()
@@ -812,7 +817,7 @@ class SeekDeepUtils:
         groupby_columns = ['ym']
 
         # apply burnin to sdo
-        self.sdo = self.sdo[self.sdo.date >= self.burnin]
+        self.sdo = self.sdo[self.sdo.date >= self.sdo.burnin]
 
         # collapse all clones to a single infection event at a date
         if individual == True:
@@ -838,17 +843,30 @@ class SeekDeepUtils:
                 }).\
             reset_index()
 
+
+        # get exposure by group
+        if not agecat:
+            monthly_infections['exposure'] = monthly_infections.apply(
+                lambda x : self.meta[self.meta.burnin <= x.ym.to_timestamp() + pd.offsets.Day(28)].cohortid.unique().size,
+                axis=1)
+        else:
+            monthly_infections['exposure'] = monthly_infections.apply(
+                lambda x : self.meta[
+                    (self.meta.agecat == x.agecat) &
+                    (self.meta.burnin <= x.ym.to_timestamp() + pd.offsets.Day(28))
+                    ].cohortid.unique().size,
+                axis=1)
+
         # calculate FOI
-        monthly_infections['exposure'] = self.__foi_exposure__(self.meta)
         monthly_infections['foi'] = monthly_infections.apply(
-            lambda x : x.infection_event / (x.date * x.exposure),
+            lambda x : x.infection_event / (x.date * x.exposure) if x.exposure > 0 else 0,
             axis=1)
         return monthly_infections
     def __foi_method_person__(self, individual=False):
         """calculate force of infection for each person"""
 
         # apply burn in to dataframe
-        self.sdo = self.sdo[self.sdo.date >= self.burnin]
+        self.sdo = self.sdo[self.sdo.date >= self.sdo.burnin]
 
         # calculate infections with collapsed haplotype infection events
         if individual == True:
@@ -874,10 +892,14 @@ class SeekDeepUtils:
 
         return cid_infections
     def __label_haplotype_infection_type__(self, group):
-        """for each new infection past the burnin assign all following haplotype events as new infections"""
+        """
+        for each new infection past the burnin :
+        assign all following haplotype events as new infections
+        """
         # find infection events past the burnin
+
         group['true_new'] = group.apply(
-            lambda x : True if (x.infection_event > 0) & (x.date >= self.burnin) else False,
+            lambda x : (x.infection_event) & (x.date >= x.burnin),
             axis = 1)
 
         # find if there are any new infections past the burnin
@@ -888,6 +910,21 @@ class SeekDeepUtils:
             group.iloc[true_news.min():, -1] = True
 
         return group
+    def FindCIDBurnin(self, month_offset=3):
+        """find burnin period for all cohortids given a month offset"""
+        # get enrolldate by cid
+        cid_burnin = self.pr2.\
+            groupby('cohortid').\
+            apply(lambda x : x.enrolldate.min()).\
+            reset_index().\
+            rename(columns={0 : 'enrolldate'})
+        # shift by burnin
+        cid_burnin['burnin'] = cid_burnin.\
+            apply(lambda x: x['enrolldate'] + pd.DateOffset(months = self.burnin), axis=1)
+        self.meta['burnin'] = self.meta.\
+            apply(lambda x: x['enrolldate'] + pd.DateOffset(months = self.burnin), axis=1)
+
+        return cid_burnin
     def fix_filtered_SDO(self, sdo):
         """recalculates attributes of SeekDeep output dataframe post-filtering"""
         self.sdo = sdo
@@ -949,10 +986,10 @@ class SeekDeepUtils:
         return self.durations
     def Old_New_Infection_Labels(self, controls=False, allowedSkips = 3, default=15, burnin='2018-01-01'):
         """labels cid~hid infections that developed past a burn-in date as new else old"""
-        self.burnin = pd.to_datetime(burnin)
-        self.__prepare_skips__()
+        # self.burnin = pd.to_datetime(burnin)
+        self.cid_burnin = self.FindCIDBurnin(month_offset=3)
+        self.skip_df = self.__prepare_skips__()
         self.__label_new_infections__(allowedSkips)
-
 
         hit_labels = self.skip_df.\
             groupby(['cohortid', 'h_popUID']).\
@@ -961,14 +998,16 @@ class SeekDeepUtils:
         return hit_labels
     def New_Infections(self, controls=False, allowedSkips = 3, burnin='2018-01-01'):
         """calculates number of new infections for each haplotype in each cohortid with allowed skips"""
-        self.burnin = pd.to_datetime(burnin)
+        # self.burnin = pd.to_datetime(burnin)
+        self.cid_burnin = self.FindCIDBurnin(month_offset=3)
         self.__prepare_skips__()
         self.__label_new_infections__(allowedSkips)
 
         return self.skip_df
-    def Force_of_Infection(self, controls=False, foi_method = 'all', allowedSkips = 3, default=15, burnin = '2018-01-01'):
+    def Force_of_Infection(self, controls=False, foi_method = 'all', allowedSkips = 3, default=15, burnin=3):
         """calculate force of infection for a dataset"""
-        self.burnin = pd.to_datetime(burnin)
+        self.burnin = burnin
+        self.cid_burnin = self.FindCIDBurnin(self.burnin)
         self.__prepare_skips__()
         self.__label_new_infections__(allowedSkips)
         self.sdo = self.sdo.merge(self.skip_df, how='left')
