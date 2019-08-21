@@ -510,10 +510,8 @@ def main(args):
         qpcr_threshold=0,
         burnin=args.burnin
         )
-    infection_labels = sdu.Old_New_Infection_Labels()
-
-    survival = NewSurvival(
-        infection_labels,
+    survival = Survival(
+        sdu.Old_New_Infection_Labels(),
         sdu.meta
     )
 
