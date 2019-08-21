@@ -5,6 +5,7 @@ import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
 import sys, warnings, time
+from seekdeep_modules import SeekDeepUtils
 from tqdm import tqdm
 
 from scipy.optimize import minimize
@@ -17,10 +18,10 @@ sns.set_style('ticks')
 class Survival:
     pd.set_option('mode.chained_assignment', None) # remove settingwithcopywarning
     warnings.simplefilter(action='ignore', category=FutureWarning)
-    def __init__(self, sdo, meta, burnin='2018-01-01', allowedSkips=3, fail_flag=True, qpcr_threshold = 0.1):
+    def __init__(self, sdo, meta, burnin=3, allowedSkips=3, fail_flag=True, qpcr_threshold = 0.1):
         self.sdo = sdo
         self.meta = meta
-        self.burnin = pd.to_datetime(burnin)
+        self.burnin = pd.to_datetime('2018-01-01')
         self.allowedSkips = allowedSkips
         self.fail_flag = fail_flag
         self.qpcr_threshold = qpcr_threshold
@@ -89,8 +90,13 @@ class Survival:
 
         self.sdo['cohortid'] = self.sdo.cohortid.astype('int')
         self.sdo['date'] = pd.to_datetime(self.sdo.date)
+        # # self.sdo['burnin'] = self.sdo.apply(
+        #     lambda x : x['date'] + pd.DateOffset(months = self.burnin),
+        #     axis=1
+        #     )
 
         # select columns of interest
+        # self.sdo = self.sdo[['cohortid', 'date', 'burnin', 'h_popUID', 'c_AveragedFrac']]
         self.sdo = self.sdo[['cohortid', 'date', 'h_popUID', 'c_AveragedFrac']]
     def __split_cid_date__(self, row):
         """convert s_Sample to date and cohortid"""
@@ -694,21 +700,153 @@ class Survival:
         plt.savefig("../plots/survival/qpcr_exponentialSurvival.pdf")
         plt.show()
         plt.close()
+class NewSurvival:
+    def __init__(self, infections, meta, n_datebins=18):
+        self.infections = infections
+        self.meta = meta
+        self.n_datebins = n_datebins
+
+        self.ValidateInfections()
+        self.BinDates()
+
+        self.original_infections = self.infections.copy()
+    def ValidateInfections(self):
+        self.infections.date = pd.to_datetime(self.infections.date)
+    def BinDates(self):
+        """bin columns (dates) into evenly spaced windows based on first and last visit"""
+        dates = self.infections.date.unique()
+        self.date_bins = pd.date_range(
+            dates.min(),
+            dates.max(),
+            periods=self.n_datebins
+        )
+
+        date_bins = []
+        for d in dates:
+            assigned_bin = self.date_bins[np.where(self.date_bins <= d)[0].max()]
+            date_bins.append(assigned_bin)
+
+        self.date_bins = pd.DataFrame({'date_bin' : date_bins, 'date' : dates})
+
+        self.infections = self.infections.\
+            merge(self.date_bins)
+    def BootstrapInfections(self):
+        """randomly sample with replacement on CID"""
+        c = self.original_infections.cohortid.unique().copy()
+        rc = np.random.choice(c, c.size)
+        self.infections = self.original_infections.copy()
+
+        # calculate index size for each cohortid in random choice
+        cid_size = np.array([np.where(self.infections.cohortid == i)[0].size for i in rc])
+
+        # set index to cohortid
+        self.infections = self.infections.set_index('cohortid')
+
+        # generate bootstrap
+        self.infections = self.infections.loc[rc]
+
+        # create array of new cid_id with expected length
+        new_cid = np.concatenate([np.full(cid_size[i], i) for i in range(cid_size.size)]).ravel()
+
+        # have hashable id num to cid
+        self.bootstrap_id_dates = pd.Series(rc)
+
+        self.infections = self.infections.reset_index()
+        self.infections['cohortid'] = new_cid
+    def OldNewSurvival(self, bootstrap=False):
+        """plot proportion of haplotypes are old v new in population"""
+        def cid_hid_cat_count(x):
+            return x[['cohortid','h_popUID']].drop_duplicates().shape[0]
+        def calculate_percentages(df):
+            chc_counts = df.\
+                groupby(['date_bin', 'true_new']).\
+                apply(lambda x : cid_hid_cat_count(x)).\
+                reset_index().\
+                rename(columns = {0 : 'counts'})
+            chc_counts['pc'] = chc_counts[['date_bin','counts']].\
+                groupby('date_bin').\
+                apply(lambda x : x / x.sum())
+            chc_counts['true_new'] = chc_counts.true_new.apply(lambda x : 'new' if x else 'old')
+            return chc_counts
+        def plot_ons(odf, boots=pd.DataFrame()):
+            if not boots.empty:
+                for v in odf.true_new.unique():
+                    sns.lineplot(data=odf[odf.true_new == v],  x='date_bin', y='pc', label=v, lw=4)
+                    plt.fill_between(
+                        boots[v].index,
+                        [i for i,j in boots[v].values],
+                        [j for i,j in boots[v].values],
+                        alpha = 0.5)
+            else:
+                sns.lineplot(data=odf, x='date_bin', y = 'pc', hue='true_new')
+            plt.xlabel('Date')
+            plt.ylabel('Percentage')
+            plt.title('Fraction of Old Clones In Infected Population')
+            plt.savefig("../plots/survival/hid_survival.pdf")
+            plt.show()
+            plt.close()
+        odf = calculate_percentages(self.original_infections)
+        if bootstrap:
+            boots = []
+            for i in tqdm(range(200), desc = 'bootstrapping'):
+                self.BootstrapInfections()
+                df = calculate_percentages(self.infections)
+                boots.append(df)
+
+            boots = pd.concat(boots)
+            boots = boots.groupby(['true_new', 'date_bin']).apply(lambda x : np.percentile(x.pc, [2.5, 97.5]))
+            plot_ons(odf, boots)
+        else:
+            plot_ons(odf)
+
+
+
+def get_args():
+    p = argparse.ArgumentParser()
+    p.add_argument('-i', '--seekdeep_output', required=False,
+        default="../prism2/full_prism2/final_filter.tab",
+        help="SeekDeep Output to use as input to functions")
+    p.add_argument('-m', '--meta', required=False,
+        default= "../prism2/stata/filtered_visits.dta",
+        help="Cohort Meta information (stata13) to relate cohortids")
+    p.add_argument('-b', '--burnin', default=3, type=int,
+        help="Number of months to consider a patient in burnin period (default = 3 months)")
+    args = p.parse_args()
+    return args
 def main():
-    sdo_fn = "../prism2/full_prism2/pfama1_sampInfo.tab.txt"
-    meta_fn = "../prism2/stata/filtered_visits.dta"
+    # sdo_fn = "../prism2/full_prism2/pfama1_sampInfo.tab.txt"
+    # meta_fn = "../prism2/stata/filtered_visits.dta"
+    # burnin = 3
+    #
+    # sdo = pd.read_csv(sdo_fn, sep='\t')
+    # meta = pd.read_stata(meta_fn)
+    #
+    # sdu = SeekDeepUtils(
+    #     sdo = sdo,
+    #     meta = meta,
+    #     fail_flag=False,
+    #     qpcr_threshold=0,
+    #     burnin=3
+    #     )
+    # infection_labels = sdu.Old_New_Infection_Labels()
 
-    sdo = pd.read_csv(sdo_fn, sep='\t')
-    meta = pd.read_stata(meta_fn)
-
+    infection_labels = pd.read_csv('example_labels.tab', sep="\t")
+    meta = pd.read_csv('example_meta.tab', sep="\t", low_memory=False)
+    survival = NewSurvival(
+        infection_labels,
+        meta
+    )
+    survival.OldNewSurvival(bootstrap=True)
     # calculate Expected and Observed for skip vals in range
-    s = Survival(sdo, meta, fail_flag=False, qpcr_threshold=0)
-    s.OldNewSurvival(bootstrap=True)
-    s.CID_oldnewsurvival(bootstrap=True)
-    s.OldWaning(bootstrap=True)
-    s.Durations(bootstrap=True)
-    s.Duration_Age(bootstrap=True)
-    s.Duration_qPCR(bootstrap=True)
+    # s = Survival(sdo, meta, fail_flag=False, qpcr_threshold=0)
+    # s.infections[s.infections.cohortid == 3096].sort_values(['hid', 'date'])
+    #
+    # s.OldNewSurvival(bootstrap=False)
+    # s.CID_oldnewsurvival(bootstrap=True)
+    # s.OldWaning(bootstrap=True)
+    # s.Durations(bootstrap=True)
+    # s.Duration_Age(bootstrap=True)
+    # s.Duration_qPCR(bootstrap=True)
 
 if __name__ == '__main__':
     main()
