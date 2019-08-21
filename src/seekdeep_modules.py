@@ -374,7 +374,7 @@ class SeekDeepUtils:
         self.pr2['h_fraction'] = self.pr2.qpcr * self.pr2.c_AveragedFrac
     def __prepare_meta__(self):
         """prepare meta data for usage in timeline generation"""
-        self.meta = self.meta[['date', 'cohortid', 'qpcr', 'agecat', 'enrolldate']]
+        self.meta = self.meta[['date', 'cohortid', 'qpcr', 'agecat', 'enrolldate', 'malariacat', 'ageyrs']]
         self.meta['date'] = pd.to_datetime(self.meta['date'])
         self.meta['enrolldate'] = pd.to_datetime(self.meta['enrolldate'])
         self.meta['cohortid'] = self.meta['cohortid'].astype('int')
@@ -984,9 +984,8 @@ class SeekDeepUtils:
         self.durations = self.__prepare_durations__(i_durations)
 
         return self.durations
-    def Old_New_Infection_Labels(self, controls=False, allowedSkips = 3, default=15, burnin='2018-01-01'):
+    def Old_New_Infection_Labels(self, controls=False, allowedSkips = 3, default=15):
         """labels cid~hid infections that developed past a burn-in date as new else old"""
-        # self.burnin = pd.to_datetime(burnin)
         self.cid_burnin = self.FindCIDBurnin(month_offset=3)
         self.skip_df = self.__prepare_skips__()
         self.__label_new_infections__(allowedSkips)

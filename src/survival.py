@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
-import sys, warnings, time
+import sys, warnings, time, argparse
 from seekdeep_modules import SeekDeepUtils
 from tqdm import tqdm
 
@@ -16,705 +16,44 @@ sns.set(rc={'figure.figsize':(15, 12), 'lines.linewidth': 2})
 sns.set_style('ticks')
 
 class Survival:
-    pd.set_option('mode.chained_assignment', None) # remove settingwithcopywarning
-    warnings.simplefilter(action='ignore', category=FutureWarning)
-    def __init__(self, sdo, meta, burnin=3, allowedSkips=3, fail_flag=True, qpcr_threshold = 0.1):
-        self.sdo = sdo
-        self.meta = meta
-        self.burnin = pd.to_datetime('2018-01-01')
-        self.allowedSkips = allowedSkips
-        self.fail_flag = fail_flag
-        self.qpcr_threshold = qpcr_threshold
-        self.minimum_duration = pd.Timedelta('15 days')
-
-        self.pr2 = pd.DataFrame()
-        self.timelines = pd.DataFrame()
-        self.cid_dates = pd.Series()
-        self.treatments = pd.Series()
-        self.infections = pd.DataFrame()
-        self.mass_reindex = []
-        self.date_bins = np.array([])
-        self.column_bins = np.array([])
-        self.bootstrap_id_dates = pd.Series()
-
-        self.__prepare_df__()
-        self.__timeline__()
-        self.__cid_dates__()
-        self.__cid_ages__()
-        self.__mark_treatments__()
-        self.__label_new_infections__()
-        self.__bin_dates__()
-
-        self.original_infections = self.infections.copy()
-        self.in_boot = False
-    def __prepare_df__(self):
-        """prepare dataframe for timeline creation"""
-        self.__prepare_sdo__()
-        self.__prepare_meta__()
-
-        # filter qpcr dates
-        if self.qpcr_threshold > 0:
-            self.meta = self.meta[(self.meta.qpcr == 0) | (self.meta.qpcr >= self.qpcr_threshold)]
-
-        # merge meta and sdo
-        self.pr2 = self.meta.merge(self.sdo, how='left')
-
-        # filter all positive qpcr dates with failed sequencing
-        if self.fail_flag:
-            self.pr2 = self.pr2[~((self.pr2.qpcr > 0) & np.isnan(self.pr2.c_AveragedFrac))]
-    def __prepare_meta__(self):
-        """prepare meta data for usage in timeline generation"""
-        self.agecat_rename = {
-            '< 5 years'  : 1,
-            '5-15 years' : 2,
-            '16 years or older' : 3}
-        self.meta = self.meta[['date', 'cohortid', 'qpcr', 'agecat', 'malariacat', 'ageyrs']]
-        self.meta['date'] = pd.to_datetime(self.meta['date'])
-        self.meta['cohortid'] = self.meta['cohortid'].astype('int')
-        self.meta['agecat'] = self.meta.agecat.apply(lambda x : self.agecat_rename[x])
-        self.meta.sort_values(by='date', inplace=True)
-        self.meta = self.meta[~self.meta.qpcr.isna()]
-        self.cid_count = self.meta['cohortid'].unique().size
-    def __prepare_sdo__(self, controls=False):
-        """prepare seekdeep output dataframe for internal usage"""
-        # keep only patient samples and normalize dataframe
-        if controls == False:
-            self.sdo = self.sdo[~self.sdo.s_Sample.str.contains('ctrl|neg')]
-        else:
-            self.sdo = self.sdo
-
-        # split cid and date
-        self.sdo[['date', 'cohortid']] = self.sdo.apply(
-            lambda x : self.__split_cid_date__(x),
-            axis = 1, result_type = 'expand')
-
-        self.sdo['cohortid'] = self.sdo.cohortid.astype('int')
-        self.sdo['date'] = pd.to_datetime(self.sdo.date)
-        # # self.sdo['burnin'] = self.sdo.apply(
-        #     lambda x : x['date'] + pd.DateOffset(months = self.burnin),
-        #     axis=1
-        #     )
-
-        # select columns of interest
-        # self.sdo = self.sdo[['cohortid', 'date', 'burnin', 'h_popUID', 'c_AveragedFrac']]
-        self.sdo = self.sdo[['cohortid', 'date', 'h_popUID', 'c_AveragedFrac']]
-    def __split_cid_date__(self, row):
-        """convert s_Sample to date and cohortid"""
-        a = row.s_Sample.split('-')
-        date, cid = '-'.join(a[:3]), a[-1]
-        return [date, cid]
-    def __timeline__(self):
-        """generate timelines for each cohortid"""
-        self.timelines = self.pr2.pivot_table(
-            values = 'c_AveragedFrac',
-            index=['cohortid', 'h_popUID'],
-            columns='date', dropna=False).\
-            dropna(axis=0, how='all')
-        self.timelines = (self.timelines > 0).astype('int')
-    def __cid_dates__(self):
-        """create a series indexed by cid for all dates of that cid"""
-        self.cid_dates = self.pr2[['cohortid', 'date']].\
-            drop_duplicates().\
-            groupby('cohortid').\
-            apply(lambda x : x.date.values)
-    def __cid_ages__(self):
-        """create a series indexed by cid for final age of that cid"""
-        self.cid_ages = self.pr2[['cohortid', 'date', 'ageyrs']].\
-            drop_duplicates().\
-            groupby(['cohortid']).\
-            apply(lambda x : x.tail(1).ageyrs)
-    def __bin_dates__(self):
-        """bin columns (dates) into 12 evenly spaced windows based on first and last visit"""
-        dates = pd.to_datetime(self.infections.date.unique())
-        self.date_bins = pd.date_range(
-            dates.min(),
-            dates.max(),
-            periods=13
-        )
-
-        # merge everything before january 1 2018
-        self.date_bins = np.delete(self.date_bins, 1)
-
-        date_bins = []
-        for d in dates:
-            assigned_bin = self.date_bins[np.where(self.date_bins <= d)[0].max()]
-            date_bins.append(assigned_bin)
-
-        self.date_bins = pd.DataFrame({'date_bin' : date_bins, 'date' : dates})
-
-        self.infections = self.infections.\
-            merge(self.date_bins)
-    def __mark_treatments__(self):
-        """mark all malaria dates where treatment was given"""
-        def treatments(x):
-            return x[x.malariacat == 'Malaria'].date.unique()
-        self.treatments = self.pr2.groupby(['cohortid']).apply(lambda x : treatments(x))
-    def __get_skips__(self, x):
-        """return skips for timeline row"""
-        # find all infection events
-        i_event = x.values.nonzero()[1]
-
-        # find distances between infection events
-        vals = np.diff(i_event)
-
-        # subtract one from distances to reflect true skip size
-        return vals - 1
-    def __infection_duration__(self, x, skips):
-        """split infections into single or multiple dependant on skips"""
-        i_event = x.values.nonzero()[1]
-        if np.all(skips <= self.allowedSkips):
-            # one continuous infection
-            return np.array([i_event, np.nan])
-        else:
-            # reinfection occurs under allowed skips
-            return np.split(i_event, np.where(skips > self.allowedSkips)[0] + 1)
-    def __timeline_marker__(self, timeline, ifx):
-        """
-        given an infection timeline,
-        label old or new if first infection is
-        before or after burnin
-        1 if old
-        2 if new
-        """
-        t = pd.to_datetime(timeline.columns[ifx[0]])
-        ifx = range(ifx.min(), ifx.max() + 1)
-        if t <= self.burnin:
-            timeline.iloc[:,ifx] = 1
-        else:
-            timeline.iloc[:,ifx] = 2
-
-        return timeline
-    def __type_labeller__(self, x):
-        """
-        calculate skips
-        split infection timelines if reinfection (based on skips)
-        label infection timelines as old or new
-        return timeline
-        """
-        cid, hid = x.name
-
-        timeline = x.loc[:,self.cid_dates[cid]]
-
-        skips = self.__get_skips__(timeline)
-        ifx = self.__infection_duration__(timeline, skips)
-
-        return ifx
-    def __mark_timeline__(self, x):
-        cid, hid, i = x.name
-        vals = x.values[0][0]
-        ifx = np.arange(vals.min(), vals.max() + 1)
-        dates = self.cid_dates[cid][ifx]
-        if pd.to_datetime(dates[0]) <= self.burnin:
-            i_state = 1
-        else:
-            i_state = 2
-
-        self.mass_reindex.append([cid, hid, i_state, dates])
-    def __label_new_infections__(self):
-        """create old and new infection timelines"""
-        # find infection times
-        self.infections = self.timelines.\
-            groupby(level=[0,1], sort=False).\
-            apply(lambda x : self.__type_labeller__(x)).\
-            apply(pd.Series).\
-            stack().\
-            to_frame('ifx')
-        self.infections.index.names = ['cohortid', 'hid', 'ifx_num']
-
-        # split multiple infections to separate observations
-        self.infections.groupby(level=[0,1,2], sort=False).\
-            apply(lambda x : self.__mark_timeline__(x))
-
-        # split infection dates to separate observations
-        self.infections = pd.DataFrame(self.mass_reindex)
-        self.infections.columns = ['cohortid', 'hid', 'val', 'date']
-        wide_form = self.infections.date.\
-            apply(pd.Series).\
-            merge(self.infections.drop(columns='date'), left_index=True, right_index=True)
-
-        self.infections = pd.melt(
-                wide_form,
-                id_vars = ['cohortid', 'hid', 'val']).\
-            drop(columns = 'variable').\
-            fillna('nope')
-
-        # drop NAs from melted dataframe
-        self.infections = self.infections[self.infections.value != 'nope']
-
-        # rename columns
-        self.infections.columns = ['cohortid', 'hid', 'val', 'date']
-
-        # convert date column to datetime
-        self.infections.date = pd.to_datetime(self.infections.date)
-    def __bootstrap_cid__(self):
-        """randomly sample with replacement on CID"""
-        c = self.original_infections.cohortid.unique().copy()
-        rc = np.random.choice(c, c.size)
-        self.infections = self.original_infections.copy()
-
-        # calculate index size for each cohortid in random choice
-        cid_size = np.array([np.where(self.infections.cohortid == i)[0].size for i in rc])
-
-        # set index to cohortid
-        self.infections = self.infections.set_index('cohortid')
-
-        # generate bootstrap
-        self.infections = self.infections.loc[rc]
-
-        # create array of new cid_id with expected length
-        new_cid = np.concatenate([np.full(cid_size[i], i) for i in range(cid_size.size)]).ravel()
-
-        # have hashable id num to cid
-        self.bootstrap_id_dates = pd.Series(rc)
-
-        self.infections = self.infections.reset_index()
-        self.infections['cohortid'] = new_cid
-    def OldNewSurvival(self, bootstrap=False):
-        """plot proportion of haplotypes are old v new in population"""
-        def cid_hid_cat_count(x):
-            return x[['cohortid','hid']].drop_duplicates().shape[0]
-        def calculate_percentages(df):
-            chc_counts = df.\
-                groupby(['date_bin', 'val']).\
-                apply(lambda x : cid_hid_cat_count(x)).\
-                reset_index().\
-                rename(columns = {0 : 'counts'})
-            chc_counts['pc'] = chc_counts[['date_bin','counts']].\
-                groupby('date_bin').\
-                apply(lambda x : x / x.sum())
-            chc_counts['val'] = chc_counts.val.apply(lambda x : 'old' if x==1 else 'new')
-            return chc_counts
-        def plot_ons(odf, boots=pd.DataFrame()):
-            if not boots.empty:
-                for v in odf.val.unique():
-                    sns.lineplot(data=odf[odf.val == v],  x='date_bin', y='pc', label=v, lw=4)
-                    plt.fill_between(
-                        boots[v].index,
-                        [i for i,j in boots[v].values],
-                        [j for i,j in boots[v].values],
-                        alpha = 0.5)
-            else:
-                sns.lineplot(data=odf, x='date_bin', y = 'pc', hue='val')
-            plt.xlabel('Date')
-            plt.ylabel('Percentage')
-            plt.title('Fraction of Old Clones In Infected Population')
-            plt.savefig("../plots/survival/hid_survival.pdf")
-            plt.show()
-            plt.close()
-        odf = calculate_percentages(self.original_infections)
-        if bootstrap:
-            boots = []
-            for i in tqdm(range(200), desc = 'bootstrapping'):
-                self.__bootstrap_cid__()
-                df = calculate_percentages(self.infections)
-                boots.append(df)
-
-            boots = pd.concat(boots)
-            boots = boots.groupby(['val', 'date_bin']).apply(lambda x : np.percentile(x.pc, [2.5, 97.5]))
-            plot_ons(odf, boots)
-        else:
-            plot_ons(odf)
-    def CID_oldnewsurvival(self, bootstrap=False):
-        """plot proportion of people with old v new v mixed"""
-        def cid_cat_count(x, mix=True):
-            return x['val'].unique().sum()
-        def date_cat_count(x):
-            return x.cohortid.drop_duplicates().shape[0]
-        def calculate_percentages(df):
-            mix_counts = df.\
-                groupby(['cohortid', 'date_bin']).\
-                apply(lambda x : cid_cat_count(x)).\
-                reset_index().\
-                rename(columns = {0 : 'c_val'})
-            date_counts = mix_counts.groupby(['date_bin', 'c_val']).\
-                apply(lambda x : date_cat_count(x)).\
-                reset_index().\
-                rename(columns = {0 : 'counts'})
-            piv = date_counts.\
-                pivot(index='date_bin', columns='c_val', values='counts').\
-                rename(columns = {1 : 'old', 2 : 'new', 3 : 'mix'}).\
-                fillna(0)
-            if piv.shape[1] == 3:
-                piv['mix_old'] = piv.old + piv.mix
-                piv['mix_new'] = piv.new + piv.mix
-                piv = piv.drop(columns = 'mix')
-            else:
-                piv['mix_old'] = piv.old
-                piv['mix_new'] = piv.new
-
-            date_sums = piv[['mix_old', 'mix_new']].sum(axis = 1)
-            piv = piv.\
-                apply(lambda x : x / self.cid_count, axis = 0).\
-                reset_index()
-
-            df = pd.melt(piv, id_vars = 'date_bin')
-            df['mixed'] = df.c_val.apply(lambda x : 'mix' in x)
-
-            return df
-        def plot_cons(odf, boots = pd.DataFrame()):
-            if not boots.empty:
-                lines = []
-                colors = []
-                for v in odf.c_val.unique():
-                    ls = ':' if 'mix' in v else '-'
-                    cl = 'teal' if 'old' in v else 'coral'
-                    ax = sns.lineplot(
-                        data=odf[odf.c_val == v],
-                        x='date_bin',
-                        y='value',
-                        label=v,
-                        # color=cl,
-                        lw=4)
-                    plt.fill_between(
-                        boots[v].index,
-                        [i for i,j in boots[v].values],
-                        [j for i,j in boots[v].values],
-                        alpha = 0.3)
-                    lines.append(ls)
-                    colors.append(cl)
-                [ax.lines[i].set_linestyle(lines[i]) for i in range(len(lines))]
-                [ax.lines[i].set_color(colors[i]) for i in range(len(lines))]
-            else:
-                sns.lineplot(data=odf, x='date_bin', y ='value', hue='c_val', style='mixed')
-
-
-            plt.xlabel('Date')
-            plt.ylabel('Percentage')
-            plt.title('Fraction of New and Old Clones by Individual')
-            plt.savefig("../plots/survival/CID_survival.pdf")
-            plt.show()
-            plt.close()
-
-        odf = calculate_percentages(self.original_infections)
-        if bootstrap :
-            boots = []
-            for i in tqdm(range(200), desc = 'bootstrapping'):
-                self.__bootstrap_cid__()
-                df = calculate_percentages(self.infections)
-                boots.append(df)
-            boots = pd.concat(boots)
-            boots = boots.groupby(['c_val', 'date_bin']).apply(lambda x : np.percentile(x.value, [2.5, 97.5]))
-            plot_cons(odf, boots)
-        else:
-            plot_cons(odf)
-    def OldWaning(self, bootstrap=False):
-        """calculate fraction of old clones remaining across each month past the burnin"""
-        def monthly_kept(x):
-            # sys.exit(x)
-            return x[x.val == 1][['cohortid', 'hid']].drop_duplicates().shape[0]
-        def waning(df):
-            monthly_counts = df.groupby('date_bin').apply(lambda x : monthly_kept(x))
-            oc_idx = np.where(
-                (monthly_counts.index.year == self.burnin.year) &
-                (monthly_counts.index.month == self.burnin.month))[0]
-            oc = monthly_counts[oc_idx].values
-            monthly_counts = monthly_counts/oc
-            return monthly_counts[monthly_counts.index > self.burnin]
-        def plot_wane(omc, boots=pd.DataFrame()):
-            g = sns.lineplot(x = omc.index, y = omc.values, legend=False, lw=5)
-            if not boots.empty:
-                plt.fill_between(
-                    boots.index,
-                    y1=[i for i,j in boots.values],
-                    y2=[j for i,j in boots.values],
-                    alpha=0.3)
-            plt.xlabel('Date')
-            plt.title('Percentage')
-            plt.title('Fraction of Old Clones Remaining')
-            g.get_figure().savefig("../plots/survival/oldClones.pdf")
-            plt.show()
-            plt.close()
-
-        omc = waning(self.original_infections)
-        if bootstrap:
-            boots = []
-            for i in tqdm(range(200), desc='bootstrapping'):
-                self.__bootstrap_cid__()
-                mc = waning(self.infections)
-                boots.append(mc)
-            boots = pd.concat(boots)
-            boots = boots.groupby(level = 0).apply(lambda x : np.percentile(x, [2.5, 97.5]))
-            plot_wane(omc, boots)
-        else:
-            plot_wane(omc)
-    def Durations(self, bootstrap=False):
-        """estimate durations using exponential model"""
-        self.in_boot = False
-        def inf_durations(x):
-            """only add minimum_duration if not treated and set hard burnin"""
-            cid = x.cohortid.unique()[0]
-            if self.in_boot:
-                cid = self.bootstrap_id_dates[cid]
-
-            burnout = pd.to_datetime(self.cid_dates[cid][-self.allowedSkips:]).min()
-            treatment = False
-
-            if x.date.max() <= self.burnin:
-                return np.nan
-            if x.date.max().to_datetime64() in self.treatments[cid]:
-                treatment = True
-
-            s_obs = ~np.any(x.date <= self.burnin)
-            e_obs = ~np.any(x.date >= burnout)
-
-
-            t_start = x.date.min() - self.minimum_duration if s_obs else self.burnin
-            t_end = x.date.max() if e_obs else self.study_end
-            t_end = t_end + self.minimum_duration if not treatment else t_end
-
-            t = t_end - t_start
-
-            return t
-        def exp_likelihood(l, t):
-            lik = l * np.exp(-l * t)
-            log_lik = np.log(lik).sum()
-            return -1 * log_lik
-        def fit_model(df):
-            self.study_start = df.date.min()
-            self.study_end = df.date.max()
-            t = df.\
-                groupby(['cohortid', 'hid', 'val']).\
-                apply(lambda x : inf_durations(x)).\
-                dt.days.values
-            t = t[~np.isnan(t)]
-            while True:
-                lam = np.random.random()
-                m = minimize(exp_likelihood, lam, t, method='TNC', bounds=((0, 1), ))
-                if m.success:
-                    break
-            return m.x
-        def plot_boots(boots, lam):
-            sns.distplot(boots, color='teal')
-            plt.axvline(lam, linestyle=':', lw=5, color='teal')
-            plt.xlabel("Calculated Lambda")
-            plt.title("Calculated Lambda and Distribution of Bootstrapped Lambdas")
-            plt.savefig("../plots/survival/exponentialSurvival.pdf")
-            plt.show()
-            plt.close()
-
-        lam = fit_model(self.original_infections)
-        if bootstrap:
-            self.in_boot=True
-            boots = []
-            for i in tqdm(range(300), desc='bootstrapping'):
-                self.__bootstrap_cid__()
-                boot_lam = fit_model(self.infections)
-                boots.append(boot_lam)
-            boots = np.array(boots)
-            lower, upper = np.percentile(boots, [2.5, 97.5])
-            print("Fit Lambda : {0} ({1}, {2})".format(lam, lower, upper))
-            print("Expected Duration : {0} ({1}, {2})".format(1/lam, 1/upper, 1/lower))
-            plot_boots(boots, lam)
-        else:
-            print("Fit Lambda : {}".format(lam))
-            print("Expected Duration : {0} days".format(1 / lam))
-    def Duration_Age(self, bootstrap=False):
-        """fit exponential model as a function of age"""
-        self.in_boot=False
-        def inf_durations(x):
-            """only add minimum_duration if not treated and set hard burnin"""
-            cid = x.cohortid.unique()[0]
-            if self.in_boot:
-                cid = self.bootstrap_id_dates[cid]
-
-            burnout = pd.to_datetime(self.cid_dates[cid][-self.allowedSkips:]).min()
-            treatment = False
-
-            if x.date.max() <= self.burnin:
-                return np.nan
-            if x.date.max().to_datetime64() in self.treatments[cid]:
-                treatment = True
-
-            s_obs = ~np.any(x.date <= self.burnin)
-            e_obs = ~np.any(x.date >= burnout)
-
-
-            t_start = x.date.min() - self.minimum_duration if s_obs else self.burnin
-            t_end = x.date.max() if e_obs else self.study_end
-            t_end = t_end + self.minimum_duration if not treatment else t_end
-
-            t = t_end - t_start
-
-            return t
-        def get_age(x):
-            """get final age of cohortid"""
-            cid = x.cohortid.unique()[0]
-            if self.in_boot:
-                cid = self.bootstrap_id_dates[cid]
-            return self.cid_ages[cid]
-        def exp_likelihood_age(lam, vectors):
-            """estimate likelihood as a function of age"""
-            durations, ages = vectors
-            log_lambda = lam[0] + (lam[1] * ages)
-            lambdas = np.exp(log_lambda)
-            log_lik = log_lambda - (lambdas * durations)
-            return -1 * log_lik.sum()
-        def fit_model(df):
-            """fit model as a a function of age"""
-            self.study_start = df.date.min()
-            self.study_end = df.date.max()
-            t = df.\
-                groupby(['cohortid', 'hid', 'val']).\
-                apply(lambda x : inf_durations(x)).\
-                dt.days.values
-            age = df.\
-                groupby(['cohortid', 'hid', 'val']).\
-                apply(lambda x : get_age(x)).\
-                values
-            age = age[~np.isnan(t)]
-            t = t[~np.isnan(t)]
-
-            lam = np.random.random(2)
-            vectors = [t, age]
-            exp_likelihood_age(lam, vectors)
-            m = minimize(exp_likelihood_age, lam, vectors, method='Nelder-Mead')
-            return m
-        def print_coefficients(om, boots):
-            boots = np.array(boots)
-            CI = np.percentile(boots, [2.5, 97.5], axis=0).T
-
-            print('Calculated Coeffecients : ')
-            for i in range(om.x.size):
-                print('    l{:d} : {:.5f} ({:.5f} : {:.5f})'.format(i, om.x[i], CI[i][0], CI[i][1]))
-
-        age_space = np.linspace(1,60,200)
-        om = fit_model(self.original_infections)
-        olam = np.exp(om.x[0] + (om.x[1] * age_space))
-        sns.lineplot(age_space , 1/olam)
-        if bootstrap:
-            self.in_boot=True
-            boots=[]
-            for i in tqdm(range(200)):
-                self.__bootstrap_cid__()
-                m = fit_model(self.infections)
-                boots.append(m.x)
-                lams = np.exp(m.x[0] + m.x[1] * age_space)
-                sns.lineplot(age_space, 1/lams, alpha = 0.3, legend=False, lw=0.5, color='grey')
-            print_coefficients(om, boots)
-
-        plt.ylabel("Calculated Duration")
-        plt.xlabel("Age")
-        plt.title("Calculated Duration as a function of Age")
-        plt.savefig("../plots/survival/age_exponentialSurvival.pdf")
-        plt.show()
-        plt.close()
-    def Duration_qPCR(self, bootstrap=False):
-        self.in_boot=False
-        def inf_durations(x):
-            """only add minimum_duration if not treated and set hard burnin"""
-            cid = x.cohortid.unique()[0]
-            if self.in_boot:
-                cid = self.bootstrap_id_dates[cid]
-
-            burnout = pd.to_datetime(self.cid_dates[cid][-self.allowedSkips:]).min()
-            treatment = False
-
-            if x.date.max() <= self.burnin:
-                return np.nan
-            if x.date.max().to_datetime64() in self.treatments[cid]:
-                treatment = True
-
-            s_obs = ~np.any(x.date <= self.burnin)
-            e_obs = ~np.any(x.date >= burnout)
-
-
-            t_start = x.date.min() - self.minimum_duration if s_obs else self.burnin
-            t_end = x.date.max() if e_obs else self.study_end
-            t_end = t_end + self.minimum_duration if not treatment else t_end
-
-            t = t_end - t_start
-
-            return t
-        def get_qpcr(x):
-            """get mean qpcr of cid~hid~inf"""
-            cid = x.cohortid.unique()[0]
-            hid = x.hid.unique()[0]
-            dates = x.date.values
-
-            if self.in_boot:
-                cid = self.bootstrap_id_dates[cid]
-            qpcrs = self.meta[
-                (self.meta.cohortid == cid) &
-                (self.meta.date.isin(dates))].qpcr
-
-            qm = qpcrs.mean()
-            if qm == 0:
-                qm += 1e-6
-            return np.log(qm)
-        def exp_likelihood_age(lam, vectors):
-            """estimate likelihood as a function of age"""
-            durations, qpcr = vectors
-            log_lambda = lam[0] + (lam[1] * qpcr)
-            lambdas = np.exp(log_lambda)
-            log_lik = log_lambda + (-lambdas * durations)
-            return -1 * log_lik.sum()
-        def fit_model(df):
-            """fit model as a a function of age"""
-            self.study_start = df.date.min()
-            self.study_end = df.date.max()
-            t = df.\
-                groupby(['cohortid', 'hid', 'val']).\
-                apply(lambda x : inf_durations(x)).\
-                dt.days.values
-            qpcrs = df.\
-                groupby(['cohortid', 'hid', 'val']).\
-                apply(lambda x : get_qpcr(x)).\
-                values
-
-            qpcrs = qpcrs[~np.isnan(t)]
-            t = t[~np.isnan(t)]
-
-            lam = np.random.random(2)
-            vectors = [t, qpcrs]
-            e = exp_likelihood_age(lam, vectors)
-            m = minimize(exp_likelihood_age, lam, vectors, method='Nelder-Mead')
-            return m
-        def print_coefficients(om, boots):
-            boots = np.array(boots)
-            CI = np.percentile(boots, [2.5, 97.5], axis=0).T
-
-            print('Calculated Coeffecients : ')
-            for i in range(om.x.size):
-                print('    l{:d} : {:.5f} ({:.5f} : {:.5f})'.format(i, om.x[i], CI[i][0], CI[i][1]))
-
-
-        qpcr_space = np.linspace(0.1,10, 200)
-        om = fit_model(self.original_infections)
-        print(om)
-        olam = np.exp(om.x[0] + (om.x[1] * qpcr_space))
-        sns.lineplot(qpcr_space , 1/olam)
-        if bootstrap:
-            self.in_boot=True
-            boots = []
-            for i in tqdm(range(100), desc='bootstrapping'):
-                self.__bootstrap_cid__()
-                m = fit_model(self.infections)
-                lams = np.exp(m.x[0] + (m.x[1] * qpcr_space))
-                sns.lineplot(qpcr_space, 1/lams, alpha = 0.3, legend=False, lw=0.5, color='grey')
-                boots.append(m.x)
-            print_coefficients(om, boots)
-
-        plt.ylabel("Calculated Duration")
-        plt.xlabel("QPCR (log)")
-        plt.title("Calculated Duration as a function of QPCR")
-        plt.savefig("../plots/survival/qpcr_exponentialSurvival.pdf")
-        plt.show()
-        plt.close()
-class NewSurvival:
-    def __init__(self, infections, meta, n_datebins=18):
+    def __init__(self, infections, meta, n_datebins=18, burnin=3, allowedSkips=3):
         self.infections = infections
         self.meta = meta
         self.n_datebins = n_datebins
+        self.burnin = burnin
+        self.allowedSkips = allowedSkips
+        self.minimum_duration = pd.Timedelta('15 days')
 
         self.ValidateInfections()
-        self.BinDates()
+        self.ValidateMeta()
+        self.MakeDateBins()
+        self.MakeCohortidDates()
+        self.MarkTreatments()
+        self.MarkAges()
 
         self.original_infections = self.infections.copy()
     def ValidateInfections(self):
+        """validate labeled infections for information required"""
+
+        # convert infection date to date if not already
         self.infections.date = pd.to_datetime(self.infections.date)
-    def BinDates(self):
+
+        # convert burnin to date if not already
+        self.infections.burnin = pd.to_datetime(self.infections.burnin)
+    def ValidateMeta(self):
+        """validate meta dataframe for information required"""
+
+        self.meta.date = pd.to_datetime(self.meta.date)
+        self.meta.enrolldate = pd.to_datetime(self.meta.enrolldate)
+
+        # add burnin from enrolldate if not already supplied
+        self.meta['burnin'] = self.meta.apply(
+            lambda x : x['enrolldate'] + pd.DateOffset(months = self.burnin),
+            axis=1
+            )
+    def MakeDateBins(self):
         """bin columns (dates) into evenly spaced windows based on first and last visit"""
-        dates = self.infections.date.unique()
+        dates = self.meta.date.unique()
         self.date_bins = pd.date_range(
             dates.min(),
             dates.max(),
@@ -723,13 +62,61 @@ class NewSurvival:
 
         date_bins = []
         for d in dates:
-            assigned_bin = self.date_bins[np.where(self.date_bins <= d)[0].max()]
-            date_bins.append(assigned_bin)
+            try:
+                assigned_bin = self.date_bins[np.where(self.date_bins <= d)[0].max()]
+                date_bins.append(assigned_bin)
+            except ValueError:
+                # condition where date is missing (pd.NaT not working...)
+                date_bins.append(0)
+                continue
 
         self.date_bins = pd.DataFrame({'date_bin' : date_bins, 'date' : dates})
+        self.date_bins = self.date_bins[self.date_bins.date_bin != 0]
 
+        # apply date bins to infection and meta dataframes
         self.infections = self.infections.\
-            merge(self.date_bins)
+            merge(self.date_bins, how='left')
+
+        self.meta = self.meta.\
+            merge(self.date_bins, how='left')
+
+        self.DateBinCounts()
+    def DateBinCounts(self):
+        """count number of people within a datebin"""
+        cid_enrolldates = self.meta[['cohortid', 'enrolldate']].drop_duplicates()
+        bins = self.date_bins.date_bin.unique()
+
+        bin_counts = []
+        for i, bin in enumerate(bins[:-1]):
+            bin_counts.append(
+                cid_enrolldates[cid_enrolldates.enrolldate <= bins[i+1]].cohortid.count()
+            )
+        # bin_counts.append(cid_enrolldates[cid_enrolldates.enrolldate <= bins[i+1]].cohortid.count())
+
+        self.bin_counts = pd.DataFrame({
+            'date_bin' : bins[:-1],
+            'bin_counts' : bin_counts
+        })
+
+        self.date_bins = self.date_bins.merge(self.bin_counts, how='left')
+    def MakeCohortidDates(self):
+        """create a series indexed by cid for all dates of that cid"""
+        self.cid_dates = self.infections[['cohortid', 'date']].\
+            drop_duplicates().\
+            groupby('cohortid').\
+            apply(lambda x : x.date.values)
+    def MarkTreatments(self):
+        """mark all malaria dates where treatment was given"""
+        def treatments(x):
+            return x[x.malariacat == 'Malaria'].date.unique()
+        self.treatments = self.meta.groupby(['cohortid']).apply(lambda x : treatments(x))
+    def MarkAges(self):
+        """create a series indexed by cid for final age of that cid"""
+
+        self.cid_ages = self.meta[['cohortid', 'date', 'ageyrs']].\
+            drop_duplicates().\
+            groupby(['cohortid']).\
+            apply(lambda x : x.tail(1).ageyrs)
     def BootstrapInfections(self):
         """randomly sample with replacement on CID"""
         c = self.original_infections.cohortid.unique().copy()
@@ -753,7 +140,7 @@ class NewSurvival:
 
         self.infections = self.infections.reset_index()
         self.infections['cohortid'] = new_cid
-    def OldNewSurvival(self, bootstrap=False):
+    def OldNewSurvival(self, bootstrap=False, n_iter=200):
         """plot proportion of haplotypes are old v new in population"""
         def cid_hid_cat_count(x):
             return x[['cohortid','h_popUID']].drop_duplicates().shape[0]
@@ -788,7 +175,7 @@ class NewSurvival:
         odf = calculate_percentages(self.original_infections)
         if bootstrap:
             boots = []
-            for i in tqdm(range(200), desc = 'bootstrapping'):
+            for i in tqdm(range(n_iter), desc = 'bootstrapping'):
                 self.BootstrapInfections()
                 df = calculate_percentages(self.infections)
                 boots.append(df)
@@ -798,55 +185,344 @@ class NewSurvival:
             plot_ons(odf, boots)
         else:
             plot_ons(odf)
+    def CID_oldnewsurvival(self, bootstrap=False, n_iter=200):
+        """plot proportion of people with old v new v mixed"""
+        def cid_cat_count(x, mix=True):
+            return (x['true_new'] + 1).unique().sum()
+        def date_cat_count(x):
+            return x.cohortid.drop_duplicates().shape[0]
+        def calculate_percentages(df):
+            mix_counts = df.\
+                groupby(['cohortid', 'date_bin']).\
+                apply(lambda x : cid_cat_count(x)).\
+                reset_index().\
+                rename(columns = {0 : 'cid_true_new'})
+            date_counts = mix_counts.groupby(['date_bin', 'cid_true_new']).\
+                apply(lambda x : date_cat_count(x)).\
+                reset_index().\
+                rename(columns = {0 : 'counts'})
+
+            piv = date_counts.\
+                pivot(index='date_bin', columns='cid_true_new', values='counts').\
+                rename(columns = {1 : 'old', 2 : 'new', 3 : 'mix'}).\
+                fillna(0)
+
+            if piv.shape[1] == 3:
+                piv['mix_old'] = piv.old + piv.mix
+                piv['mix_new'] = piv.new + piv.mix
+                piv = piv.drop(columns = 'mix')
+            else:
+                piv['mix_old'] = piv.old
+                piv['mix_new'] = piv.new
+
+            # convert old/new/mix values into fractions of datebin active population
+            piv = piv.apply(
+                lambda x : x.values / self.bin_counts.bin_counts.values,
+                axis=0
+                ).reset_index()
+
+            df = pd.melt(piv, id_vars = 'date_bin')
+            df['mixed'] = df.cid_true_new.apply(lambda x : 'mix' in x)
+
+            return df
+        def plot_cons(odf, boots = pd.DataFrame()):
+            if not boots.empty:
+                lines = []
+                colors = []
+                for v in odf.cid_true_new.unique():
+                    ls = ':' if 'mix' in v else '-'
+                    cl = 'teal' if 'old' in v else 'coral'
+                    ax = sns.lineplot(
+                        data=odf[odf.cid_true_new == v],
+                        x='date_bin',
+                        y='value',
+                        label=v,
+                        # color=cl,
+                        lw=4)
+                    plt.fill_between(
+                        boots[v].index,
+                        [i for i,j in boots[v].values],
+                        [j for i,j in boots[v].values],
+                        alpha = 0.3)
+                    lines.append(ls)
+                    colors.append(cl)
+                [ax.lines[i].set_linestyle(lines[i]) for i in range(len(lines))]
+                [ax.lines[i].set_color(colors[i]) for i in range(len(lines))]
+            else:
+                sns.lineplot(data=odf, x='date_bin', y ='value', hue='cid_true_new', style='mixed')
 
 
+            plt.xlabel('Date')
+            plt.ylabel('Percentage')
+            plt.title('Fraction of New and Old Clones by Individual')
+            plt.savefig("../plots/survival/CID_survival.pdf")
+            plt.show()
+            plt.close()
 
+        odf = calculate_percentages(self.original_infections)
+        if bootstrap :
+            boots = []
+            for i in tqdm(range(n_iter), desc = 'bootstrapping'):
+                self.BootstrapInfections()
+                df = calculate_percentages(self.infections)
+                boots.append(df)
+            boots = pd.concat(boots)
+            boots = boots.groupby(['cid_true_new', 'date_bin']).apply(lambda x : np.percentile(x.value, [2.5, 97.5]))
+            plot_cons(odf, boots)
+        else:
+            plot_cons(odf)
+    def OldWaning(self, bootstrap=False, n_iter=200):
+        """calculate fraction of old clones remaining across each month past the burnin (use october meta)"""
+        def monthly_kept(x):
+            """return number of old infections past burnin"""
+            monthly_old = x[(~x.true_new) & (x.date >= x.burnin)]
+            return monthly_old[['cohortid', 'h_popUID']].drop_duplicates().shape[0]
+        def waning(df):
+            monthly_counts = df.groupby('date_bin').apply(lambda x : monthly_kept(x))
+            return monthly_counts / monthly_counts.values.max()
+        def plot_wane(omc, boots=pd.DataFrame()):
+            g = sns.lineplot(x = omc.index, y = omc.values, legend=False, lw=5)
+            if not boots.empty:
+                plt.fill_between(
+                    boots.index,
+                    y1=[i for i,j in boots.values],
+                    y2=[j for i,j in boots.values],
+                    alpha=0.3
+                    )
+            plt.xlabel('Date')
+            plt.title('Percentage')
+            plt.title('Fraction of Old Clones Remaining')
+            g.get_figure().savefig("../plots/survival/oldClones.pdf")
+            plt.show()
+            plt.close()
+
+        omc = waning(self.original_infections)
+        if bootstrap:
+            boots = []
+            for i in tqdm(range(n_iter), desc='bootstrapping'):
+                self.BootstrapInfections()
+                mc = waning(self.infections)
+                boots.append(mc)
+            boots = pd.concat(boots)
+            boots = boots.groupby(level = 0).apply(lambda x : np.percentile(x, [2.5, 97.5]))
+            plot_wane(omc, boots)
+        else:
+            plot_wane(omc)
+    def Durations(self, bootstrap=False, n_iter=200):
+        """estimate durations using exponential model"""
+        self.in_boot = False
+        def inf_durations(x):
+            """only add minimum_duration if not treated and set hard burnin"""
+            cid = x.cohortid.unique()[0]
+            if self.in_boot:
+                cid = self.bootstrap_id_dates[cid]
+
+
+            burnout = pd.to_datetime(self.cid_dates[cid][-self.allowedSkips:]).min()
+            treatment = False
+
+            if x.date.max() <= x.burnin.max():
+                return np.nan
+            if x.date.max().to_datetime64() in self.treatments[cid]:
+                treatment = True
+
+            s_obs = ~np.any(x.date <= x.burnin)
+            e_obs = ~np.any(x.date >= burnout)
+
+
+            t_start = x.date.min() - self.minimum_duration if s_obs else x.burnin.min()
+            t_end = x.date.max() if e_obs else self.study_end
+            t_end = t_end + self.minimum_duration if not treatment else t_end
+
+
+            t = t_end - t_start
+
+            return t
+        def exp_likelihood(l, t):
+            lik = l * np.exp(-l * t)
+            log_lik = np.log(lik).sum()
+            return -1 * log_lik
+        def fit_model(df):
+            self.study_start = df.date.min()
+            self.study_end = df.date.max()
+            t = df.\
+                groupby(['cohortid', 'h_popUID', 'true_new']).\
+                apply(lambda x : inf_durations(x)).\
+                dt.days.values
+            t = t[~np.isnan(t)]
+            while True:
+                lam = np.random.random()
+                m = minimize(exp_likelihood, lam, t, method='TNC', bounds=((0, 1), ))
+                if m.success:
+                    break
+            return m.x
+        def plot_boots(boots, lam):
+            sns.distplot(boots, color='teal')
+            plt.axvline(lam, linestyle=':', lw=5, color='teal')
+            plt.xlabel("Calculated Lambda")
+            plt.title("Calculated Lambda and Distribution of Bootstrapped Lambdas")
+            plt.savefig("../plots/survival/exponentialSurvival.pdf")
+            plt.show()
+            plt.close()
+
+        lam = fit_model(self.original_infections)
+        if bootstrap:
+            self.in_boot=True
+            boots = []
+            for i in tqdm(range(n_iter), desc='bootstrapping'):
+                self.BootstrapInfections()
+                boot_lam = fit_model(self.infections)
+                boots.append(boot_lam)
+            boots = np.array(boots)
+            lower, upper = np.percentile(boots, [2.5, 97.5])
+            print("Fit Lambda : {0} ({1}, {2})".format(lam, lower, upper))
+            print("Expected Duration : {0} ({1}, {2})".format(1/lam, 1/upper, 1/lower))
+            plot_boots(boots, lam)
+        else:
+            print("Fit Lambda : {}".format(lam))
+            print("Expected Duration : {0} days".format(1 / lam))
+    def Duration_Age(self, bootstrap=False, n_iter=200):
+        """fit exponential model as a function of age"""
+        self.in_boot=False
+        def inf_durations(x):
+            """only add minimum_duration if not treated and set hard burnin"""
+            cid = x.cohortid.unique()[0]
+            if self.in_boot:
+                cid = self.bootstrap_id_dates[cid]
+
+
+            burnout = pd.to_datetime(self.cid_dates[cid][-self.allowedSkips:]).min()
+            treatment = False
+
+            if x.date.max() <= x.burnin.max():
+                return np.nan
+            if x.date.max().to_datetime64() in self.treatments[cid]:
+                treatment = True
+
+            s_obs = ~np.any(x.date <= x.burnin)
+            e_obs = ~np.any(x.date >= burnout)
+
+
+            t_start = x.date.min() - self.minimum_duration if s_obs else x.burnin.min()
+            t_end = x.date.max() if e_obs else self.study_end
+            t_end = t_end + self.minimum_duration if not treatment else t_end
+
+
+            t = t_end - t_start
+
+            return t
+        def get_age(x):
+            """get final age of cohortid"""
+            cid = x.cohortid.unique()[0]
+            if self.in_boot:
+                cid = self.bootstrap_id_dates[cid]
+            return self.cid_ages[cid]
+        def exp_likelihood_age(lam, vectors):
+            """estimate likelihood as a function of age"""
+            durations, ages = vectors
+            log_lambda = lam[0] + (lam[1] * ages)
+            lambdas = np.exp(log_lambda)
+            log_lik = log_lambda - (lambdas * durations)
+            return -1 * log_lik.sum()
+        def fit_model(df):
+            """fit model as a a function of age"""
+            self.study_start = df.date.min()
+            self.study_end = df.date.max()
+            t = df.\
+                groupby(['cohortid', 'h_popUID', 'true_new']).\
+                apply(lambda x : inf_durations(x)).\
+                dt.days.values
+            age = df.\
+                groupby(['cohortid', 'h_popUID', 'true_new']).\
+                apply(lambda x : get_age(x)).\
+                values
+            age = age[~np.isnan(t)]
+            t = t[~np.isnan(t)]
+
+            lam = np.random.random(2)
+            vectors = [t, age]
+            exp_likelihood_age(lam, vectors)
+            m = minimize(exp_likelihood_age, lam, vectors, method='Nelder-Mead')
+            return m
+        def print_coefficients(om, boots):
+            boots = np.array(boots)
+            CI = np.percentile(boots, [2.5, 97.5], axis=0).T
+
+            print('Calculated Coeffecients : ')
+            for i in range(om.x.size):
+                print('    l{:d} : {:.5f} ({:.5f} : {:.5f})'.format(i, om.x[i], CI[i][0], CI[i][1]))
+
+        age_space = np.linspace(1,60,200)
+        om = fit_model(self.original_infections)
+        olam = np.exp(om.x[0] + (om.x[1] * age_space))
+        sns.lineplot(age_space , 1/olam)
+        if bootstrap:
+            self.in_boot=True
+            boots=[]
+            for i in tqdm(range(n_iter)):
+                self.BootstrapInfections()
+                m = fit_model(self.infections)
+                boots.append(m.x)
+                lams = np.exp(m.x[0] + m.x[1] * age_space)
+                sns.lineplot(age_space, 1/lams, alpha = 0.3, legend=False, lw=0.5, color='grey')
+            print_coefficients(om, boots)
+
+        plt.ylabel("Calculated Duration")
+        plt.xlabel("Age")
+        plt.title("Calculated Duration as a function of Age")
+        plt.savefig("../plots/survival/age_exponentialSurvival.pdf")
+        plt.show()
+        plt.close()
 def get_args():
     p = argparse.ArgumentParser()
-    p.add_argument('-i', '--seekdeep_output', required=False,
+    p.add_argument('-i', '--seekdeep_output',
+        required=False,
         default="../prism2/full_prism2/final_filter.tab",
-        help="SeekDeep Output to use as input to functions")
-    p.add_argument('-m', '--meta', required=False,
-        default= "../prism2/stata/filtered_visits.dta",
-        help="Cohort Meta information (stata13) to relate cohortids")
-    p.add_argument('-b', '--burnin', default=3, type=int,
-        help="Number of months to consider a patient in burnin period (default = 3 months)")
+        help="SeekDeep Output to use as input to functions"
+        )
+    p.add_argument('-m', '--meta',
+        required=False,
+        default= "../prism2/stata/rolling_enrollment.tab",
+        help="Cohort Meta information (tsv) to relate cohortids"
+        )
+    p.add_argument('-b', '--burnin',
+        default=3, type=int,
+        help="Number of months to consider a patient in burnin period (default = 3 months)"
+        )
+    p.add_argument('--bootstrap',
+        action='store_true',
+        help='run same analyses on simulated data'
+        )
+    p.add_argument('--num_iter',
+        default=200, type=int,
+        help='number of bootstraps to run'
+        )
     args = p.parse_args()
     return args
-def main():
-    # sdo_fn = "../prism2/full_prism2/pfama1_sampInfo.tab.txt"
-    # meta_fn = "../prism2/stata/filtered_visits.dta"
-    # burnin = 3
-    #
-    # sdo = pd.read_csv(sdo_fn, sep='\t')
-    # meta = pd.read_stata(meta_fn)
-    #
-    # sdu = SeekDeepUtils(
-    #     sdo = sdo,
-    #     meta = meta,
-    #     fail_flag=False,
-    #     qpcr_threshold=0,
-    #     burnin=3
-    #     )
-    # infection_labels = sdu.Old_New_Infection_Labels()
+def main(args):
+    sdo = pd.read_csv(args.seekdeep_output, sep='\t')
+    meta = pd.read_csv(args.meta, sep="\t", low_memory=False)
 
-    infection_labels = pd.read_csv('example_labels.tab', sep="\t")
-    meta = pd.read_csv('example_meta.tab', sep="\t", low_memory=False)
+    sdu = SeekDeepUtils(
+        sdo = sdo,
+        meta = meta,
+        fail_flag=False,
+        qpcr_threshold=0,
+        burnin=args.burnin
+        )
+    infection_labels = sdu.Old_New_Infection_Labels()
+
     survival = NewSurvival(
         infection_labels,
-        meta
+        sdu.meta
     )
-    survival.OldNewSurvival(bootstrap=True)
-    # calculate Expected and Observed for skip vals in range
-    # s = Survival(sdo, meta, fail_flag=False, qpcr_threshold=0)
-    # s.infections[s.infections.cohortid == 3096].sort_values(['hid', 'date'])
-    #
-    # s.OldNewSurvival(bootstrap=False)
-    # s.CID_oldnewsurvival(bootstrap=True)
-    # s.OldWaning(bootstrap=True)
-    # s.Durations(bootstrap=True)
-    # s.Duration_Age(bootstrap=True)
-    # s.Duration_qPCR(bootstrap=True)
+
+    survival.OldNewSurvival(bootstrap=False, n_iter=200)
+    survival.CID_oldnewsurvival(bootstrap=False, n_iter=200)
+    survival.OldWaning(bootstrap=False, n_iter=200)
+    survival.Durations(bootstrap=False, n_iter=200)
+    survival.Duration_Age(bootstrap=False, n_iter=100)
 
 if __name__ == '__main__':
-    main()
+    args = get_args()
+    main(args)
