@@ -582,16 +582,16 @@ class Survival:
                 print("Fit Lambda : {}".format(lam))
                 print("Expected Duration : {0} days".format(1 / lam))
 class ExponentialDecay:
-    def __init__(self, infections, left_censor=None, right_censor=None, minimum_duration=15, seed=None):
+    def __init__(self, infections, left_censor='2018-01-01', right_censor='2019-02-01', minimum_duration=15, seed=None):
         if seed:
             np.random.seed(seed)
 
-        left_censor = pd.to_datetime('2018-01-01')
-        right_censor = pd.to_datetime('2019-02-01')
+        # left_censor = pd.to_datetime('2018-01-01')
+        # right_censor = pd.to_datetime('2019-02-01')
 
         self.infections = infections
-        self.study_start = left_censor if left_censor else infections.date.min()
-        self.study_end = right_censor if right_censor else infections.date.max()
+        self.study_start = pd.to_datetime(left_censor) if left_censor else infections.date.min()
+        self.study_end = pd.to_datetime(right_censor) if right_censor else infections.date.max()
         self.minimum_duration = pd.Timedelta('{} Days'.format(minimum_duration))
 
         self.durations = []
@@ -780,6 +780,30 @@ def DecayByAgecat(age_frame, n_iter=100):
         plt.axvline(1/ estimated_values[i], label=indices[i], color=sns.color_palette()[i], linestyle=':', lw=5)
         plt.legend(labels = indices)
     plt.show()
+def DecayByPeriod(infections, n_iter=100):
+    ed_classes = []
+    estimated_values = []
+    bootstrapped_values = []
+    indices = []
+
+    dates = infections.date.unique()
+    date_bins = pd.date_range(dates.min(), dates.max(), periods=6)
+    for i, bin_label in enumerate(date_bins[1:-1]):
+        ed = ExponentialDecay(survival.original_infections, left_censor=date_bins[i], right_censor=date_bins[i+1])
+        l, bsl = ed.fit(bootstrap=True, n_iter=n_iter)
+
+        indices.append(bin_label)
+        ed_classes.append(ed)
+        estimated_values.append(l)
+        bootstrapped_values.append(bsl)
+
+    for i, _ in enumerate(ed_classes):
+        sns.distplot(1 / bootstrapped_values[i], bins=30)
+        plt.axvline(1/ estimated_values[i], label=indices[i], color=sns.color_palette()[i], linestyle=':', lw=5)
+        plt.legend(labels = indices)
+    plt.show()
+
+    return ed_classes
 def SplitByAgecat(ageyrs_frame, breaks=[9, 20]):
     breaks = np.array(breaks)
 
@@ -811,19 +835,23 @@ def develop():
     )
     survival.RemoveTreated()
 
+    default_decay = ExponentialDecay(survival.original_infections)
+    default_decay.fit(bootstrap=True, n_iter=300)
+    default_decay.plot()
+
+
+
     # age categories annotated in meta
     age_frame = survival.original_infections.merge(survival.meta[['cohortid', 'agecat']], how='inner').drop_duplicates()
     DecayByAgecat(age_frame, n_iter=3)
 
-    # age categories from
+    # age categories from arbitrary break points
     ageyrs_frame = survival.original_infections.merge(survival.meta[['cohortid', 'ageyrs']], how='inner')
     ageyrs_frame = SplitByAgecat(ageyrs_frame, breaks = [16])
     DecayByAgecat(ageyrs_frame, n_iter=300)
 
 
-    ed = ExponentialDecay(survival.original_infections)
-    ed.fit(bootstrap=True, n_iter=300)
-    ed.plot()
+    ed_by_period = DecayByPeriod(survival.original_infections, n_iter=300)
 
 
 if __name__ == '__main__':
