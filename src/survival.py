@@ -594,7 +594,7 @@ class ExponentialDecay:
         self.study_end = right_censor if right_censor else infections.date.max()
         self.minimum_duration = pd.Timedelta('{} Days'.format(minimum_duration))
 
-
+        self.durations = []
         self.num_classes = np.zeros(5)
     def BootstrapInfections(self, frame):
         """Bootstrap on Cohortid"""
@@ -619,6 +619,8 @@ class ExponentialDecay:
         if (infection_min >= self.study_start) & (infection_max <= self.study_end):
             self.num_classes[1] += 1
             duration = infection_max - infection_min
+
+        # Unobserved Start + Observed End in Period
 
         # Unobserved Start + Observed End in Period
         elif (infection_min <= self.study_start) & (infection_max <= self.study_end):
@@ -646,7 +648,9 @@ class ExponentialDecay:
             groupby(['cohortid', 'h_popUID']).\
             apply(lambda x : self.ClassifyInfection(x)).\
             values
-        return durations[~np.isnan(durations)]
+        durations = durations[~np.isnan(durations)]
+        self.durations.append(durations)
+        return durations
     def RunDecayFunction(self, lam, durations):
         """
         Exponential Decay Function as Log Likelihood
@@ -684,7 +688,7 @@ class ExponentialDecay:
         self.estimated_lam = opt.x[0]
 
         if bootstrap:
-            self.bootstrapped_lams = bootstrapped_lams
+            self.bootstrapped_lams = np.array(bootstrapped_lams)
             return (self.estimated_lam, self.bootstrapped_lams)
         else:
             return self.estimated_lam
@@ -694,18 +698,17 @@ class ExponentialDecay:
         """
         ci_min, ci_max = self.GetConfidenceIntervals()
 
-        sns.distplot(self.bootstrapped_lams, color='teal')
-        plt.axvline(self.estimated_lam, color='teal', linestyle=':', lw=8)
-        plt.xlabel("Calculated Lambda")
+        sns.distplot(1 / self.bootstrapped_lams, color='teal', bins=30)
+        plt.axvline(1 / self.estimated_lam, color='teal', linestyle=':', lw=8)
+        plt.xlabel("Calculated Days (1 / lambda)")
         plt.title(
             "Estimated Lambda : {:.4f}e-3 ({:.4f}e-3 -- {:.4f}e-3)\nEstimated Days : {:.1f} ({:.1f} -- {:.1f})".format(
                 self.estimated_lam * 1e3, ci_min * 1e3, ci_max * 1e3,
-                1/self.estimated_lam, 1/ci_min, 1/ci_max
+                1/self.estimated_lam, 1/ci_max, 1/ci_min
                 )
             )
         plt.show()
         plt.close()
-
 
 def get_args():
     p = argparse.ArgumentParser()
@@ -756,6 +759,48 @@ def main(args):
     survival.OldNewSurvival(bootstrap=True, n_iter=200)
     survival.CID_oldnewsurvival(bootstrap=True, n_iter=200)
     survival.OldWaning(bootstrap=True, n_iter=200)
+
+
+def DecayByAgecat(age_frame, n_iter=100):
+    ed_classes = []
+    estimated_values = []
+    bootstrapped_values = []
+    indices = []
+    for index, frame in age_frame.groupby(['agecat']):
+        ed = ExponentialDecay(frame)
+        l, bsl = ed.fit(bootstrap=True, n_iter=n_iter)
+
+        indices.append(index)
+        ed_classes.append(ed)
+        estimated_values.append(l)
+        bootstrapped_values.append(bsl)
+
+    for i, _ in enumerate(ed_classes):
+        sns.distplot(1 /bootstrapped_values[i], bins=30)
+        plt.axvline(1/ estimated_values[i], label=indices[i], color=sns.color_palette()[i], linestyle=':', lw=5)
+        plt.legend(labels = indices)
+    plt.show()
+def SplitByAgecat(ageyrs_frame, breaks=[9, 20]):
+    breaks = np.array(breaks)
+
+    cid_age = ageyrs_frame.groupby(['cohortid']).apply(lambda x : x.ageyrs.min())
+
+    conditions = ['x < {}'.format(i) for i in breaks] + ['x >= {}'.format(breaks[-1])]
+
+    break_points = cid_age.apply(
+        lambda x : np.where(x >= breaks)[0]
+        )
+
+    cid_ageyrs = break_points.apply(
+        lambda x : conditions[x.max() + 1] if len(x) > 0 else conditions[0]
+        )
+
+    ageyrs_frame['agecat'] = ageyrs_frame.apply(lambda x : cid_ageyrs[x.cohortid], axis = 1)
+
+    print(ageyrs_frame[['cohortid', 'agecat']].drop_duplicates().groupby('agecat').count())
+
+    return ageyrs_frame
+
 def develop():
     labels = pd.read_csv('../example_labels.tab', sep="\t")
     meta = pd.read_csv('../example_meta.tab', sep="\t")
@@ -764,9 +809,20 @@ def develop():
         labels,
         meta
     )
+    survival.RemoveTreated()
+
+    # age categories annotated in meta
+    age_frame = survival.original_infections.merge(survival.meta[['cohortid', 'agecat']], how='inner').drop_duplicates()
+    DecayByAgecat(age_frame, n_iter=3)
+
+    # age categories from
+    ageyrs_frame = survival.original_infections.merge(survival.meta[['cohortid', 'ageyrs']], how='inner')
+    ageyrs_frame = SplitByAgecat(ageyrs_frame, breaks = [16])
+    DecayByAgecat(ageyrs_frame, n_iter=300)
+
 
     ed = ExponentialDecay(survival.original_infections)
-    ed.fit(bootstrap=True, n_iter=10)
+    ed.fit(bootstrap=True, n_iter=300)
     ed.plot()
 
 
