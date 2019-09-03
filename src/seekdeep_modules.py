@@ -374,7 +374,7 @@ class SeekDeepUtils:
         self.pr2['h_fraction'] = self.pr2.qpcr * self.pr2.c_AveragedFrac
     def __prepare_meta__(self):
         """prepare meta data for usage in timeline generation"""
-        self.meta = self.meta[['date', 'cohortid', 'qpcr', 'agecat', 'enrolldate', 'malariacat', 'ageyrs']]
+        self.meta = self.meta[['date', 'cohortid', 'qpcr', 'agecat', 'enrolldate', 'malariacat', 'ageyrs', 'gender']]
         self.meta['date'] = pd.to_datetime(self.meta['date'])
         self.meta['enrolldate'] = pd.to_datetime(self.meta['enrolldate'])
         self.meta['cohortid'] = self.meta['cohortid'].astype('int')
