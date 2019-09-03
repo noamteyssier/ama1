@@ -16,7 +16,7 @@ def get_args():
         default="../prism2/full_prism2/final_filter.tab",
         help="SeekDeep Output to use as input to functions")
     p.add_argument('-m', '--meta', required=False,
-        default= "../prism2/stata/filtered_visits.dta",
+        default= "../prism2/stata/rolling_enrollment.tab",
         help="Cohort Meta information (stata13) to relate cohortids")
     p.add_argument('-a', '--allele_frequency', action='store_true',
         help="Calculate allele frequencies of haplotypes in the population")
@@ -55,7 +55,7 @@ def print_out(df):
 def main():
     args = get_args()
     sdo = pd.read_csv(args.seekdeep_output, sep = "\t")
-    meta = pd.read_stata(args.meta)
+    meta = pd.read_csv(args.meta, sep="\t", low_memory=False)
 
     # initialize modules
     s = SeekDeepUtils(
@@ -88,8 +88,8 @@ def main():
     elif args.old_new_infections:
         onl = s.Old_New_Infection_Labels(
             allowedSkips = args.num_skips,
-            default=args.default_duration,
-            burnin=args.burnin)
+            default=args.default_duration
+            )
         return print_out(onl)
 
     elif args.new_infections:

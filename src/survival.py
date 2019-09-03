@@ -12,7 +12,7 @@ from scipy.optimize import minimize
 from scipy.special import expit
 
 # np.random.seed(43)
-sns.set(rc={'figure.figsize':(15, 12), 'lines.linewidth': 2})
+sns.set(rc={'figure.figsize':(30, 30), 'lines.linewidth': 2})
 sns.set_style('ticks')
 
 class Survival:
@@ -596,6 +596,7 @@ class ExponentialDecay:
 
         self.durations = []
         self.num_classes = np.zeros(5)
+        self.optimizers = []
     def BootstrapInfections(self, frame):
         """Bootstrap on Cohortid"""
         cids = frame.cohortid.unique()
@@ -612,50 +613,63 @@ class ExponentialDecay:
 
         # infection not active in period
         if (infection_max <= self.study_start) | (infection_min >= self.study_end):
-            self.num_classes[0] += 1
-            return None
+            classification = 0
+            duration = None
 
         # Start and End Observed in Period
-        if (infection_min >= self.study_start) & (infection_max <= self.study_end):
-            self.num_classes[1] += 1
+        elif (infection_min >= self.study_start) & (infection_max <= self.study_end):
+            classification = 1
             duration = infection_max - infection_min
 
         # Unobserved Start + Observed End in Period
-
-        # Unobserved Start + Observed End in Period
         elif (infection_min <= self.study_start) & (infection_max <= self.study_end):
-            self.num_classes[2] += 1
+            classification = 2
             duration = infection_max - self.study_start
 
         # Observed Start + Unobserved End in Period
         elif (infection_min >= self.study_start) & (infection_max >= self.study_end):
-            self.num_classes[3] += 1
+            classification = 3
             duration = self.study_end - infection_min
 
         # Unobserved Start + Unobserved End in Period
         elif (infection_min <= self.study_start) & (infection_max >= self.study_end):
-            self.num_classes[4] += 1
+            classification = 4
             duration = self.study_end - self.study_start
 
 
         if duration == pd.to_timedelta(0):
             duration += self.minimum_duration
 
-        return duration.days
+        if duration:
+            duration = duration.days
+
+        self.num_classes[classification] += 1
+
+        return np.array([classification, duration])
     def GetInfectionDurations(self, infection_frame):
         """for each clonal infection calculate duration"""
         durations = infection_frame.\
             groupby(['cohortid', 'h_popUID']).\
             apply(lambda x : self.ClassifyInfection(x)).\
             values
-        durations = durations[~np.isnan(durations)]
-        self.durations.append(durations)
-        return durations
-    def RunDecayFunction(self, lam, durations):
+        durations = np.vstack(durations)
+        durations = durations[durations[:,0] != 0]
+        l1_durations = durations[durations[:,0] <= 2][:,1]
+        l2_durations = durations[durations[:,0] > 2][:,1]
+
+        self.durations.append([l1_durations, l2_durations])
+        return l1_durations, l2_durations
+    def RunDecayFunction(self, lam, l1_durations, l2_durations):
         """
         Exponential Decay Function as Log Likelihood
         """
-        llk = (np.log(lam) - (lam * durations)).sum()
+
+        l1_llk = (np.log(lam) - (lam * l1_durations)).sum()
+
+        l2_llk = ((-1 * lam) * l2_durations).sum()
+
+        llk = l1_llk + l2_llk
+
         return -1 * llk
     def GetConfidenceIntervals(self, min = 5, max = 95):
         """
@@ -674,17 +688,18 @@ class ExponentialDecay:
 
 
         # generate durations and initial guess
-        durations = self.GetInfectionDurations(frame)
+        l1_durations, l2_durations = self.GetInfectionDurations(frame)
         lam = np.random.random()
 
         # run minimization of negative log likelihood
         opt = minimize(
             self.RunDecayFunction,
             lam,
-            args=(durations,),
+            args=(l1_durations, l2_durations),
             method = 'L-BFGS-B',
             bounds = ((1e-6, None),)
             )
+        self.optimizers.append(opt)
         self.estimated_lam = opt.x[0]
 
         if bootstrap:
@@ -761,26 +776,7 @@ def main(args):
     survival.OldWaning(bootstrap=True, n_iter=200)
 
 
-def DecayByAgecat(age_frame, n_iter=100):
-    ed_classes = []
-    estimated_values = []
-    bootstrapped_values = []
-    indices = []
-    for index, frame in age_frame.groupby(['agecat']):
-        ed = ExponentialDecay(frame)
-        l, bsl = ed.fit(bootstrap=True, n_iter=n_iter)
-
-        indices.append(index)
-        ed_classes.append(ed)
-        estimated_values.append(l)
-        bootstrapped_values.append(bsl)
-
-    for i, _ in enumerate(ed_classes):
-        sns.distplot(1 /bootstrapped_values[i], bins=30)
-        plt.axvline(1/ estimated_values[i], label=indices[i], color=sns.color_palette()[i], linestyle=':', lw=5)
-        plt.legend(labels = indices)
-    plt.show()
-def DecayByPeriod(infections, n_iter=100):
+def DecayByPeriod(infections, n_iter=100, label=None):
     ed_classes = []
     estimated_values = []
     bootstrapped_values = []
@@ -801,9 +797,34 @@ def DecayByPeriod(infections, n_iter=100):
         sns.distplot(1 / bootstrapped_values[i], bins=30)
         plt.axvline(1/ estimated_values[i], label=indices[i], color=sns.color_palette()[i], linestyle=':', lw=5)
         plt.legend(labels = indices)
+
+    if label:
+        plt.savefig('../plots/durations/{}.png'.format(label))
     plt.show()
 
     return ed_classes
+def DecayByGroup(infections, n_iter=100, group = ['gender'], label=None):
+    ed_classes = []
+    estimated_values = []
+    bootstrapped_values = []
+    indices = []
+    for index, frame in infections.groupby(group):
+        ed = ExponentialDecay(frame)
+        l, bsl = ed.fit(bootstrap=True, n_iter=n_iter)
+
+        indices.append(index)
+        ed_classes.append(ed)
+        estimated_values.append(l)
+        bootstrapped_values.append(bsl)
+
+    for i, _ in enumerate(ed_classes):
+        sns.distplot(1 /bootstrapped_values[i], bins=30)
+        plt.axvline(1/ estimated_values[i], label=indices[i], color=sns.color_palette()[i], linestyle=':', lw=5)
+        plt.legend(labels = indices)
+
+    if label:
+        plt.savefig('../plots/durations/{}.png'.format(label))
+    plt.show()
 def SplitByAgecat(ageyrs_frame, breaks=[9, 20]):
     breaks = np.array(breaks)
 
@@ -826,32 +847,44 @@ def SplitByAgecat(ageyrs_frame, breaks=[9, 20]):
     return ageyrs_frame
 
 def develop():
-    labels = pd.read_csv('../example_labels.tab', sep="\t")
-    meta = pd.read_csv('../example_meta.tab', sep="\t")
+    sdo = pd.read_csv('../prism2/full_prism2/final_filter.tab', sep="\t", low_memory=False)
+    meta = pd.read_csv('../prism2/stata/rolling_enrollment.tab', sep="\t", low_memory=False)
+    sdu = SeekDeepUtils(
+        sdo, meta
+    )
+
+    meta.columns.values
 
     survival = Survival(
-        labels,
-        meta
+        sdu.Old_New_Infection_Labels(),
+        sdu.meta
     )
     survival.RemoveTreated()
 
     default_decay = ExponentialDecay(survival.original_infections)
-    default_decay.fit(bootstrap=True, n_iter=300)
+    durations = default_decay.GetInfectionDurations(default_decay.infections)
+    default_decay.fit(bootstrap=True, n_iter=100)
     default_decay.plot()
-
 
 
     # age categories annotated in meta
     age_frame = survival.original_infections.merge(survival.meta[['cohortid', 'agecat']], how='inner').drop_duplicates()
-    DecayByAgecat(age_frame, n_iter=3)
+    DecayByGroup(age_frame[age_frame.cohortid != 3617], n_iter=500, group=['agecat'], label='agecat')
 
     # age categories from arbitrary break points
     ageyrs_frame = survival.original_infections.merge(survival.meta[['cohortid', 'ageyrs']], how='inner')
-    ageyrs_frame = SplitByAgecat(ageyrs_frame, breaks = [16])
-    DecayByAgecat(ageyrs_frame, n_iter=300)
+    ageyrs_frame = SplitByAgecat(ageyrs_frame, breaks = [5,10,15])
+    DecayByGroup(ageyrs_frame[ageyrs_frame.cohortid != 3617], n_iter=300, group=['agecat'], label='arbitrary_agecat')
 
+    # sex differences in durations
+    gender_frame = survival.original_infections.merge(survival.meta[['cohortid', 'gender', 'agecat']], how='inner')
+    DecayByGroup(gender_frame[gender_frame.cohortid != 3617], n_iter=300, group=['gender'], label='gender')
 
-    ed_by_period = DecayByPeriod(survival.original_infections, n_iter=300)
+    # sex and agecat differences in durations
+    DecayByGroup(gender_frame[gender_frame.cohortid != 3617], n_iter=300, group=['gender', 'agecat'], label='gender_agecat')
+
+    # durations by quarter
+    ed_by_period = DecayByPeriod(survival.original_infections[survival.original_infections.cohortid != 3617], n_iter=300, label='quarterly')
 
 
 if __name__ == '__main__':
