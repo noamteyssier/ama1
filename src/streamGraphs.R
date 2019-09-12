@@ -62,6 +62,10 @@ add_dates <- function(sg, table, y = -0.06){
       stroke_color = ifelse(malariacat == 'Malaria', 'red', 'black')
     )
   
+  y = (sg$x$data %>% group_by(date) %>% summarise(s = sum(value)))$s %>% max()
+  offset = (y / 5) * 0.01
+  y = y + offset
+  
   # iterate through dates and plot points colored by condition
   for (i in seq(1, dim(table_dates)[1])){
     
@@ -99,23 +103,10 @@ color_conditions$color <- c('blue', 'green', 'red')
 circle_types <- c("\u25CB" ,"\u25CF")
 
 # select cid with function, pipe into streamgraph
-stream <- select_cid(3604) %>% plot_stream(interpolate='basis')
+stream <- select_cid(3285) %>% plot_stream(interpolate='basis')
 stream
-
-# isolate date~conditions and add colorscheme
-sdo %>% 
-  left_join(meta) %>% 
-  group_by(cohortid, date, malariacat, qpcr) %>%
-  summarise(minimum_date_qpcr = max(qpcr)) %>% 
-  unique() %>% 
-  left_join(color_conditions) %>% 
-  mutate(
-    fill = ifelse(minimum_date_qpcr == 0, circle_types[1], circle_types[2]),
-    stroke_width = ifelse(malariacat == 'Malaria', 2, 0.5),
-    stroke_color = ifelse(malariacat == 'Malaria', 'red', 'black')
-  )
-
-
+date_sums <- (stream$x$data %>% group_by(date) %>% summarise(s = sum(value)))$s
+(date_sums %>% max() / 5) * 0.01
 
 cids <- sdo$cohortid %>% unique()
 for (c in cids){
