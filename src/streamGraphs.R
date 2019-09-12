@@ -1,6 +1,7 @@
 library(tidyverse)
 library(streamgraph)
-library(RColorBrewer)
+library(htmlwidgets)
+library(viridis)
 
 sg_add_marker <- function(sg, x, label="", stroke_width=0.5, stroke="#7f7f7f", space=5,
                           y=0, color="#7f7f7f", size=12, anchor="start") {
@@ -32,14 +33,17 @@ select_cid <- function(cid){
     ) %>% 
     return()
 }
-plot_stream <- function(table, save=FALSE, offset='silhouette', interpolate='cardinal'){
+plot_stream <- function(table, offset='silhouette', interpolate='cardinal', width=NULL, height=NULL){
   # Function to plot a stream graph
-  
+  num_haps <- table$h_popUID %>% unique() %>% length()
   sg <- streamgraph(
     table, date=date, value=qpcr_hap_log, 
-    key=h_popUID, offset=offset, interpolate = interpolate
+    key=h_popUID, offset=offset, interpolate = interpolate,
+    width = width, height = height
   ) %>% 
-    sg_fill_brewer("Set2") %>% 
+    sg_fill_manual(
+      values = viridisLite::viridis(num_haps, end=0.8)
+    ) %>% 
     add_dates(table)
   
   return(sg)
@@ -53,7 +57,9 @@ add_dates <- function(sg, table, y = -0.06){
     unique() %>% 
     left_join(color_conditions) %>% 
     mutate(
-      fill = ifelse(minimum_date_qpcr == 0, circle_types[1], circle_types[2])
+      fill = ifelse(minimum_date_qpcr == 0, circle_types[1], circle_types[2]),
+      stroke_width = ifelse(malariacat == 'Malaria', 2, 0.5),
+      stroke_color = ifelse(malariacat == 'Malaria', 'red', 'black')
     )
   
   # iterate through dates and plot points colored by condition
@@ -68,7 +74,9 @@ add_dates <- function(sg, table, y = -0.06){
         x = visit$date, y = y,
         anchor='middle',
         label=visit$fill,
-        color=visit$color
+        color=visit$color,
+        stroke_width = visit$stroke_width,
+        stroke = visit$stroke_color
       )
     
   }
@@ -76,22 +84,45 @@ add_dates <- function(sg, table, y = -0.06){
   return(sg)
 }
 
+
 # Load meta and seekdeep output 
 setwd("~/projects/ama1/src")
 
 meta <- read_tsv("../prism2/stata/full_meta_6mo_fu.tab") %>%
   filter(!is.na(qpcr))
-sdo <- read_tsv("../prism2/full_prism2/final_filter.tab")
+sdo <- read_tsv("../prism2/full_prism2/final_filter.tab") %>% 
+  filter(cohortid %in% meta$cohortid)
 
 # give color conditions and fill status
 color_conditions <- meta %>% select(malariacat) %>% unique()
 color_conditions$color <- c('blue', 'green', 'red')
 circle_types <- c("\u25CB" ,"\u25CF")
 
-
 # select cid with function, pipe into streamgraph
-stream <- select_cid(3614) %>% plot_stream(interpolate='basis-open')
+stream <- select_cid(3604) %>% plot_stream(interpolate='basis')
 stream
 
-# 3604 doesn't work...
-cids <- c(3079, 3164, 3614)
+# isolate date~conditions and add colorscheme
+sdo %>% 
+  left_join(meta) %>% 
+  group_by(cohortid, date, malariacat, qpcr) %>%
+  summarise(minimum_date_qpcr = max(qpcr)) %>% 
+  unique() %>% 
+  left_join(color_conditions) %>% 
+  mutate(
+    fill = ifelse(minimum_date_qpcr == 0, circle_types[1], circle_types[2]),
+    stroke_width = ifelse(malariacat == 'Malaria', 2, 0.5),
+    stroke_color = ifelse(malariacat == 'Malaria', 'red', 'black')
+  )
+
+
+
+cids <- sdo$cohortid %>% unique()
+for (c in cids){
+  print(c)
+  html_name = paste0(c, '.html')
+  png_name = paste0(c, '.png')
+  s <- select_cid(c) %>% plot_stream()
+  saveWidget(s, html_name)
+  webshot(html_name, png_name)
+}
