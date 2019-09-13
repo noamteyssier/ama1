@@ -1,7 +1,9 @@
 library(tidyverse)
 library(streamgraph)
 library(htmlwidgets)
+library(webshot)
 library(viridis)
+library(progress)
 
 sg_add_marker <- function(sg, x, label="", stroke_width=0.5, stroke="#7f7f7f", space=5,
                           y=0, color="#7f7f7f", size=12, anchor="start") {
@@ -25,7 +27,7 @@ select_cid <- function(cid){
   # Function to select a cid from the given data
   meta %>% 
     filter(cohortid == cid) %>%
-    left_join(sdo) %>%
+    left_join(sdo, by = c('cohortid', 'date')) %>%
     select(cohortid, date, visittype, qpcr, malariacat, h_popUID, c_AveragedFrac) %>%
     mutate(
       qpcr_log = log10(qpcr), 
@@ -48,20 +50,21 @@ plot_stream <- function(table, offset='silhouette', interpolate='cardinal', widt
   
   return(sg)
 }
-add_dates <- function(sg, table, y = -0.06){
+add_dates <- function(sg, table){
   
   # isolate date~conditions and add colorscheme
   table_dates <- table %>% 
     group_by(date, malariacat, qpcr) %>%
     summarise(minimum_date_qpcr = max(qpcr)) %>% 
     unique() %>% 
-    left_join(color_conditions) %>% 
+    left_join(color_conditions, by='malariacat') %>% 
     mutate(
       fill = ifelse(minimum_date_qpcr == 0, circle_types[1], circle_types[2]),
       stroke_width = ifelse(malariacat == 'Malaria', 2, 0.5),
       stroke_color = ifelse(malariacat == 'Malaria', 'red', 'black')
     )
   
+  # set timeline at highest point + offset determined from data
   y = (sg$x$data %>% group_by(date) %>% summarise(s = sum(value)))$s %>% max()
   offset = (y / 5) * 0.01
   y = y + offset
@@ -87,13 +90,38 @@ add_dates <- function(sg, table, y = -0.06){
   
   return(sg)
 }
+stream_over_set <- function(cid_set, prefix=NULL){
+  # function to plot a streamgraph + timeline over a set of cids
+  
+  # add prefix if given
+  if (!is.null(prefix)){
+    prefix = paste0(prefix, '_')
+  }
+  
+  pb <- progress_bar$new(
+    format = "  generating streamgraphs for set [:bar] :percent eta: :eta",
+    total = length(cid_set), clear = FALSE, width= 60)
+
+  
+  # plot and save for each cid
+  for (c in cid_set){
+    pb$tick()
+    html_name = paste0(prefix, c, '.html')
+    png_name = paste0(prefix, c, '.png')
+    
+    s <- select_cid(c) %>% plot_stream(interpolate='basis')
+    saveWidget(s, html_name)
+    webshot(html_name, png_name)
+  }
+}
 
 
 # Load meta and seekdeep output 
 setwd("~/projects/ama1/src")
 
 meta <- read_tsv("../prism2/stata/full_meta_6mo_fu.tab") %>%
-  filter(!is.na(qpcr))
+  filter(!is.na(qpcr)) %>% 
+  filter(cohortid %in% sdo$cohortid)
 sdo <- read_tsv("../prism2/full_prism2/final_filter.tab") %>% 
   filter(cohortid %in% meta$cohortid)
 
@@ -103,17 +131,25 @@ color_conditions$color <- c('blue', 'green', 'red')
 circle_types <- c("\u25CB" ,"\u25CF")
 
 # select cid with function, pipe into streamgraph
-stream <- select_cid(3285) %>% plot_stream(interpolate='basis')
-stream
-date_sums <- (stream$x$data %>% group_by(date) %>% summarise(s = sum(value)))$s
-(date_sums %>% max() / 5) * 0.01
+stream <- select_cid(3604) %>% plot_stream(interpolate='basis')
 
-cids <- sdo$cohortid %>% unique()
-for (c in cids){
-  print(c)
-  html_name = paste0(c, '.html')
-  png_name = paste0(c, '.png')
-  s <- select_cid(c) %>% plot_stream()
-  saveWidget(s, html_name)
-  webshot(html_name, png_name)
-}
+
+cid_complexity <- sdo %>% 
+  group_by(cohortid, date) %>% 
+  select(cohortid, date, s_COI) %>% 
+  group_by(cohortid) %>% 
+  summarise(m = max(s_COI))
+
+
+# high complexity
+high_complexity_cids <- filter(cid_complexity, m > 3)$cohortid
+stream_over_set(high_complexity_cids, prefix='hCOI')
+
+# malaria positive
+malaria_positive_cids <- filter(meta, malariacat == 'Malaria')$cohortid %>%  unique()
+stream_over_set(malaria_positive_cids, prefix='mPositive')
+
+# full set
+full_set_cids <- unique(sdo$cohortid)
+stream_over_set(full_set_cids, prefix='cid')
+
