@@ -120,10 +120,11 @@ stream_over_set <- function(cid_set, prefix=NULL){
 setwd("~/projects/ama1/src")
 
 meta <- read_tsv("../prism2/stata/full_meta_6mo_fu.tab") %>%
-  filter(!is.na(qpcr)) %>% 
-  filter(cohortid %in% sdo$cohortid)
+  filter(!is.na(qpcr))
 sdo <- read_tsv("../prism2/full_prism2/final_filter.tab") %>% 
   filter(cohortid %in% meta$cohortid)
+
+meta <- meta %>% filter(cohortid %in% sdo$cohortid)
 
 # give color conditions and fill status
 color_conditions <- meta %>% select(malariacat) %>% unique()
