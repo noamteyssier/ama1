@@ -447,10 +447,6 @@ class SeekDeepUtils:
                 skip_dataframe.append(self.__arrange_skips__(row, cid))
 
         self.skip_df = pd.concat(skip_dataframe)
-
-        # print(self.skip_df)
-        # sys.exit()
-
         self.skip_df.date = pd.to_datetime(self.skip_df.date)
 
         return self.skip_df
@@ -1042,26 +1038,26 @@ class SeekDeepUtils:
 
 class InfectionLabeler:
     """
-    Methods to label infection types per CID
+    Label Infection events given a qpcr threshold, burnin period, and allowed skips
     """
-    def __init__(
-        self, sdo, meta, qpcr_threshold = 0, burnin=3,
-        allowedSkips = 3, default_duration=15
-        ):
+    def __init__(self, sdo, meta, qpcr_threshold = 0, burnin=3, allowedSkips = 3):
 
         self.sdo = sdo
         self.meta = meta
         self.qpcr_threshold = qpcr_threshold
         self.burnin = burnin
         self.allowedSkips = allowedSkips
-        self.default_duration = default_duration
 
         # post processed sdo + meta
         self.frame = pd.DataFrame()
 
-        self.InitFrames()
-        self.LabelInfections()
+        # annotated skips dataframe
+        self.skips = pd.DataFrame()
 
+        # annotated infection events dataframe
+        self.labels = pd.DataFrame()
+
+        self.InitFrames()
     def PrepareSDO(self):
         """
         - Split cohortid and date from sample name
@@ -1112,6 +1108,7 @@ class InfectionLabeler:
             right_on = ['cohortid', 'date']
             )
         self.frame['h_popUID'] = self.frame['h_popUID'].astype(str)
+        self.frame.date = self.frame.date
     def AddBurnin(self):
         """
         Generate burnin and add to Meta
@@ -1145,30 +1142,44 @@ class InfectionLabeler:
         self.AddBurnin()
         self.MarkQPCR()
         self.MergeFrames()
-        self.BuildCohortidTimelines()
-    def positionalDifference(self, x):
+        self.LabelSkips()
+    def positionalDifference(self, x, post_burnin):
         """
         For a bool array x : calculate number of skips between each truth
+        calculate first truth with respect to the number of visits post burnin
         """
         truth = np.where(x)[0]
+
         if truth.size == 0:
             return np.array([])
-        else:
-            skip_arr = []
-            for i, pos in enumerate(truth):
 
-                if i == 0:
-                    skip_arr.append(0)
-                    continue
+        skip_arr = []
+        for i, pos in enumerate(truth):
 
-                diff = pos - truth[i-1]
-                skips = diff - 1
-                skip_arr.append(skips)
+            # first occurence of a haplotype
+            if i == 0:
 
-            return np.array(skip_arr)
+                # switch for burnin period
+                if pos < post_burnin:
+                    skips = pos
+                else:
+                    skips = pos - post_burnin
 
 
-    def BuildCohortidTimelines(self):
+            else:
+
+                # disregard pre-burnin skips
+                if (truth[i - 1] < post_burnin) & (pos >= post_burnin):
+                    skips = pos - post_burnin
+
+                # calculate skips in pre-burnin period
+                else:
+                    skips = pos - truth[i-1] - 1
+
+            skip_arr.append(skips)
+
+        return np.array(skip_arr)
+    def LabelSkips(self):
         """
         - Build timelines for each h_popUID~cohortid combination
         - Calculate number of skips between each passing qpcr event
@@ -1178,6 +1189,7 @@ class InfectionLabeler:
 
         skip_frame = []
         for cid, cid_frame in tqdm(self.frame.groupby(['cohortid']), desc='calculating skips'):
+            burnin = cid_frame.burnin.values[0]
 
             # convert long dates to wide
             cid_timeline = cid_frame.pivot_table(
@@ -1186,15 +1198,21 @@ class InfectionLabeler:
                 values = 'pass_qpcr'
                 )
 
+            try:
+                post_burnin = np.where(cid_timeline.columns >= burnin)[0].min()
+            except ValueError:
+                post_burnin = False
+
             # remove NaN h_popUID and fill pass_qpcr with False
             hid_timelines = cid_timeline[cid_timeline.index != 'nan'].\
                 fillna(False)
 
             # get positional difference between all passing qpcr events
             for hid, hid_frame in hid_timelines.groupby('h_popUID'):
-                skips = self.positionalDifference(hid_frame.values[0])
+
+                skips = self.positionalDifference(hid_frame.values[0], post_burnin)
                 dates = hid_frame.columns[hid_frame.values[0]]
-                visit_numbers = np.where(dates.isin(hid_frame.columns))[0]
+                visit_numbers = np.where(hid_frame.columns.isin(dates))[0]
 
                 if skips.size > 0:
                     skip_frame.append(
@@ -1204,28 +1222,78 @@ class InfectionLabeler:
 
 
         # stack events, and build dataframe
-        self.skip_frame = pd.DataFrame(
+        self.skips = pd.DataFrame(
             np.vstack(skip_frame),
             columns = ['cohortid', 'h_popUID', 'date', 'skips', 'visit_number']
             )
 
+        self.skips.date = pd.to_datetime(self.skips.date)
+    def getLabel(self, row):
+        """label infections as true or false"""
+
+        # visits before burnin are false
+        if row.date <= row.burnin:
+            return False
+
+        # first infection occurs at a timepoint past the allowed skips
+        elif row.skips > self.allowedSkips :
+            return True
+
+        # if infection is never seen before and after burnin then true
+        elif row.skips == row.visit_number:
+            return True
+
+        else:
+            return False
+    def ActiveInfection(self, group):
+        """
+        Label all timepoints where an infection is still active
+        """
+
+        infections = np.where(group.infection_event)[0]
+
+        active_array = np.zeros(group.infection_event.size)
+
+        # for each infection event, label all following infections as active
+        for i in np.arange(infections.size):
+            if i < infections.size - 1:
+                active_array[infections[i] : infections[i+1]] = 1
+            else:
+                active_array[infections[i] : ] = 1
+
+
+        return active_array
     def LabelInfections(self):
-        pass
+        """
+        Label timepoints as infection events
+        &
+        Label subsequence timepoints of infection events as active infections
+        """
+
+        self.labels = self.skips.merge(
+            self.frame[['cohortid', 'date', 'h_popUID', 'enrolldate', 'burnin']]
+            )
+
+        self.labels['infection_event'] = self.labels.apply(
+            lambda x : self.getLabel(x),
+            axis = 1
+            )
+
+        self.labels['active_infection'] = np.concatenate(self.labels.groupby(['cohortid', 'h_popUID']).apply(
+            lambda x : self.ActiveInfection(x).astype(bool)
+        ).values)
+
+        return self.labels
 
 def dev_infectionLabeler():
     sdo = pd.read_csv('../prism2/full_prism2/final_filter.tab', sep="\t")
     meta = pd.read_csv('../prism2/stata/full_meta_grant_version.tab', sep="\t", low_memory=False)
 
-    il = InfectionLabeler(sdo, meta, qpcr_threshold=0.01)
-    print(il.skip_frame)
+    il = InfectionLabeler(sdo, meta, qpcr_threshold=0)
+    infection_labels = il.LabelInfections()
+    print(infection_labels)
 
-    # sdu = SeekDeepUtils(sdo, meta, qpcr_threshold=0.01)
-    # sdu.Old_New_Infection_Labels()
-    #
-    # il.skip_frame
-    # sdu.skip_df
 
-    pass
 
 if __name__ == '__main__':
     dev_infectionLabeler()
