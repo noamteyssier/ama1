@@ -1284,6 +1284,139 @@ class InfectionLabeler:
         ).values)
 
         return self.labels
+class FOI:
+    def __init__(self, labels, meta, burnin=3):
+        self.labels = labels
+        self.meta = meta
+        self.burnin = burnin
+
+        self.frame = pd.DataFrame()
+
+        self.prepareData()
+    def prepareData(self):
+        """
+        validate column types
+        add burnin to meta
+        merge labels with meta
+        """
+        self.labels.date = pd.to_datetime(self.labels.date)
+        self.labels.enrolldate = pd.to_datetime(self.labels.enrolldate)
+        self.labels.burnin = pd.to_datetime(self.labels.burnin)
+
+        self.meta.date = pd.to_datetime(self.meta.date)
+        self.meta.enrolldate = pd.to_datetime(self.meta.enrolldate)
+
+        self.AddBurnin()
+
+        meta_vals = ['cohortid', 'date', 'agecat', 'enrolldate', 'burnin', 'gender']
+
+        self.frame = self.meta[meta_vals].merge(
+            self.labels,
+            left_on = ['cohortid', 'date', 'enrolldate', 'burnin'],
+            right_on = ['cohortid', 'date', 'enrolldate', 'burnin'],
+            how = 'left'
+            )
+    def AddBurnin(self):
+        """
+        Generate burnin and add to Meta
+
+        - Take minimum enrolldate per cohortid
+        - Add {burnin} months to enrolldate
+        - Merge with meta frame
+        """
+
+        cid_enroll = self.meta.\
+            groupby('cohortid').\
+            agg({'enrolldate' : 'min'}).\
+            reset_index()
+
+        cid_enroll['burnin'] = cid_enroll['enrolldate'] + pd.DateOffset(months = self.burnin)
+
+        self.meta = self.meta.merge(
+            cid_enroll,
+            left_on = ['cohortid', 'enrolldate'],
+            right_on = ['cohortid', 'enrolldate']
+            )
+    def getDurations(self, group=None, working_frame=None):
+        """
+        return durations across a group or a singular value for the full dataset
+        """
+        if type(working_frame) == type(None):
+            working_frame = self.frame.copy()
+
+        working_frame = working_frame[working_frame.date >= working_frame.burnin]
+
+        if group:
+            durations = working_frame.\
+                groupby(group).\
+                apply(lambda x : self.getDurations(working_frame=x))
+
+        else:
+            durations = working_frame.date.max() - working_frame.date.min()
+            durations = durations.days / 365.25
+
+        return durations
+    def getInfections(self, group=None, working_frame=None):
+        """
+        return number of infections across a group or a singular value for the full dataset
+        """
+        if type(working_frame) == type(None):
+            working_frame = self.frame.copy()
+        working_frame = working_frame[working_frame.date >= working_frame.burnin]
+
+        if group:
+            events = working_frame.\
+                groupby(group).\
+                apply(lambda x : self.getInfections(working_frame=x))
+        else:
+            events = working_frame.infection_event.sum()
+
+        return events
+    def getExposure(self, group=None, working_frame=None):
+        """
+        return number of exposed individuals across a group or a singular value for the full dataset
+        """
+        if type(working_frame) == type(None):
+            working_frame = self.frame.copy()
+
+        working_frame = working_frame[working_frame.date >= working_frame.burnin]
+
+        if group:
+            exposure = working_frame.\
+                groupby(group).\
+                apply(lambda x : self.getExposure(working_frame=x))
+        else:
+            exposure = working_frame.cohortid.unique().size
+
+        return exposure
+    def fit(self, group=None):
+        """
+        calculate force of infection across dataset given groups
+        """
+
+        durations = self.getDurations(group=group)
+        events = self.getInfections(group=group)
+        exposure = self.getExposure(group=group)
+
+        foi = events / (exposure * durations)
+
+        if group:
+            grouped_results = np.vstack([
+                i.values for i in [events, durations, exposure, foi]
+            ]).T
+            foi = pd.DataFrame(
+                grouped_results,
+                columns = ['events', 'durations', 'exposure', 'FOI'],
+                index = foi.index
+                )
+
+        else:
+            foi = pd.DataFrame(
+                np.array([events, durations, exposure, foi]).reshape(1,-1),
+                columns = ['events', 'durations', 'exposure', 'FOI']
+            )
+
+        return foi
 
 def dev_infectionLabeler():
     sdo = pd.read_csv('../prism2/full_prism2/final_filter.tab', sep="\t")
@@ -1293,7 +1426,22 @@ def dev_infectionLabeler():
     infection_labels = il.LabelInfections()
     print(infection_labels)
 
+def dev_FOI():
+    sdo = pd.read_csv('../prism2/full_prism2/final_filter.tab', sep="\t")
+    meta = pd.read_csv('../prism2/stata/full_meta_grant_version.tab', sep="\t", low_memory=False)
+
+    # il = InfectionLabeler(sdo, meta, qpcr_threshold=0)
+    # infection_labels = il.LabelInfections()
+    # infection_labels.to_csv('temp/labels.tab', sep="\t", index=False)
+
+    labels = pd.read_csv('temp/labels.tab', sep="\t")
+    foi = FOI(labels, meta)
+
+    grouped = foi.fit(group = ['agecat', 'gender'])
+    full = foi.fit(group=None)
+
+
 
 
 if __name__ == '__main__':
-    dev_infectionLabeler()
+    dev_FOI()
