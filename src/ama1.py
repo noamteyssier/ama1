@@ -2,6 +2,7 @@
 
 import numpy as np
 import pandas as pd
+from tqdm import *
 import itertools
 import sys
 
@@ -427,8 +428,6 @@ class SeekDeepUtils:
         """calculates number of skips for each cid~h_popUID at each date"""
         timelines = self.__all_timelines__()
 
-        sys.exit()
-
         skip_dataframe = []
 
         for cid, timeline in timelines.items():
@@ -439,14 +438,18 @@ class SeekDeepUtils:
 
             # find infection events and skips between them
             timeline[['i_events', 'skips']] = timeline.apply(
-            lambda x : self.__calculate_skips__(x, diagnose=True),
-            axis = 1, result_type = 'expand')
+                lambda x : self.__calculate_skips__(x, diagnose=True),
+                axis = 1, result_type = 'expand'
+                )
 
             # for haplotype row create a dataframe of skips and dates
             for _, row in timeline.iterrows():
                 skip_dataframe.append(self.__arrange_skips__(row, cid))
 
         self.skip_df = pd.concat(skip_dataframe)
+
+        # print(self.skip_df)
+        # sys.exit()
 
         self.skip_df.date = pd.to_datetime(self.skip_df.date)
 
@@ -1143,10 +1146,38 @@ class InfectionLabeler:
         self.MarkQPCR()
         self.MergeFrames()
         self.BuildCohortidTimelines()
-    def BuildCohortidTimelines(self):
+    def positionalDifference(self, x):
+        """
+        For a bool array x : calculate number of skips between each truth
+        """
+        truth = np.where(x)[0]
+        if truth.size == 0:
+            return np.array([])
+        else:
+            skip_arr = []
+            for i, pos in enumerate(truth):
 
-        for cid, cid_frame in self.frame.groupby(['cohortid']):
-            # print(cid)
+                if i == 0:
+                    skip_arr.append(0)
+                    continue
+
+                diff = pos - truth[i-1]
+                skips = diff - 1
+                skip_arr.append(skips)
+
+            return np.array(skip_arr)
+
+
+    def BuildCohortidTimelines(self):
+        """
+        - Build timelines for each h_popUID~cohortid combination
+        - Calculate number of skips between each passing qpcr event
+        - Calculate visit number of events
+        - Compile dataframe of skips and visit number
+        """
+
+        skip_frame = []
+        for cid, cid_frame in tqdm(self.frame.groupby(['cohortid']), desc='calculating skips'):
 
             # convert long dates to wide
             cid_timeline = cid_frame.pivot_table(
@@ -1159,21 +1190,24 @@ class InfectionLabeler:
             hid_timelines = cid_timeline[cid_timeline.index != 'nan'].\
                 fillna(False)
 
+            # get positional difference between all passing qpcr events
             for hid, hid_frame in hid_timelines.groupby('h_popUID'):
-                print(hid_frame.values[0])
-                print(
-                    np.where(hid_frame.values[0])[0]
-                    )
-                sys.exit()
-            if hid_timelines.shape[0] > 2:
-                print(hid_timelines.values)
-                print(
-                    np.where(hid_timelines)
-                )
-                sys.exit()
-            # print(np.where(hid_timelines.values))
+                skips = self.positionalDifference(hid_frame.values[0])
+                dates = hid_frame.columns[hid_frame.values[0]]
+                visit_numbers = np.where(dates.isin(hid_frame.columns))[0]
 
-            # break
+                if skips.size > 0:
+                    skip_frame.append(
+                        [[cid, hid, dates[i], skips[i], visit_numbers[i]]
+                        for i,_ in enumerate(skips)]
+                    )
+
+
+        # stack events, and build dataframe
+        self.skip_frame = pd.DataFrame(
+            np.vstack(skip_frame),
+            columns = ['cohortid', 'h_popUID', 'date', 'skips', 'visit_number']
+            )
 
     def LabelInfections(self):
         pass
@@ -1182,10 +1216,14 @@ def dev_infectionLabeler():
     sdo = pd.read_csv('../prism2/full_prism2/final_filter.tab', sep="\t")
     meta = pd.read_csv('../prism2/stata/full_meta_grant_version.tab', sep="\t", low_memory=False)
 
-    InfectionLabeler(sdo, meta, qpcr_threshold=0.01)
+    il = InfectionLabeler(sdo, meta, qpcr_threshold=0.01)
+    print(il.skip_frame)
 
-    # sdu = SeekDeepUtils(sdo, meta)
+    # sdu = SeekDeepUtils(sdo, meta, qpcr_threshold=0.01)
     # sdu.Old_New_Infection_Labels()
+    #
+    # il.skip_frame
+    # sdu.skip_df
 
     pass
 
