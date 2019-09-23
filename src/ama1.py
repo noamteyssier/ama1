@@ -1291,6 +1291,7 @@ class FOI:
         self.burnin = burnin
 
         self.frame = pd.DataFrame()
+        self.is_bootstrap = False
 
         self.prepareData()
     def prepareData(self):
@@ -1315,6 +1316,14 @@ class FOI:
             left_on = ['cohortid', 'date', 'enrolldate', 'burnin'],
             right_on = ['cohortid', 'date', 'enrolldate', 'burnin'],
             how = 'left'
+            )
+
+        # check if dataframe is a bootstrap, and use pseudo_cid instead of cid post merging
+        if 'pseudo_cid' in self.frame.columns:
+            self.is_bootstrap = True
+            self.frame['pseudo_cid'] = self.frame.apply(
+                lambda x : str(x.cohortid) + '_0' if str(x.pseudo_cid) == 'nan' else x.pseudo_cid,
+                axis=1
             )
     def AddBurnin(self):
         """
@@ -1380,13 +1389,14 @@ class FOI:
             working_frame = self.frame.copy()
 
         working_frame = working_frame[working_frame.date >= working_frame.burnin]
+        exposure_group = 'cohortid' if not self.is_bootstrap else 'pseudo_cid'
 
         if group:
             exposure = working_frame.\
                 groupby(group).\
                 apply(lambda x : self.getExposure(working_frame=x))
         else:
-            exposure = working_frame.cohortid.unique().size
+            exposure = working_frame[exposure_group].unique().size
 
         return exposure
     def fit(self, group=None):
@@ -1422,9 +1432,13 @@ class BootstrapCID:
     Perform bootstrapping on a dataframe by cohortid
     requires : `cohortid` as column
     """
-    def __init__(self, dataframe):
-        self.frame = dataframe.set_index('cohortid')
+    def __init__(self, dataframe, grouping='cohortid', seed=None):
+        self.frame = dataframe.set_index(grouping)
         self.cid = self.frame.index.unique()
+        self.grouping = grouping
+
+        if seed:
+            np.random.seed(seed)
     def sampleCID(self, size = 0, replace=True):
         """
         Random choice of COI in set
@@ -1432,19 +1446,35 @@ class BootstrapCID:
         if size == 0:
             size = self.cid.size
         return np.random.choice(self.cid, size, replace=replace)
+    def labelPseudo(self, bootstrap):
+        """
+        Label multiple occurences of a Cohortid with a pseudonym
+        """
 
-    def getSample(self, size=0):
+        group = ['cohortid', 'date', 'h_popUID']
+        cid_hap_date_id = bootstrap.groupby(group).apply(
+            lambda x : np.arange(x.shape[0])
+        )
+
+        bootstrap.sort_values(group, inplace=True)
+        bootstrap['pseudo_cid'] = bootstrap.cohortid.astype(str) + '_' + np.concatenate(cid_hap_date_id).astype(str)
+        return bootstrap
+    def getSample(self, size=0, pseudo_id=True):
         """
         Select cohortids found in sampling and return
         """
+
         bootstrap = self.frame.loc[self.sampleCID()].\
             reset_index()
+        if pseudo_id:
+            return self.labelPseudo(bootstrap)
+
         return bootstrap
     def getIter(self, num_iter=100):
         """
         Iterable generator for bootstraps
         """
-        for _ in np.arange(num_iter):
+        for _ in tqdm(np.arange(num_iter)):
             yield self.getSample()
 
 
@@ -1472,14 +1502,29 @@ def dev_FOI():
     grouped = foi.fit(group = ['agecat', 'gender'])
     full = foi.fit(group=None)
 
-def dev_BoostrapLabels():
+def dev_BootstrapLabels():
+    sdo = pd.read_csv('../prism2/full_prism2/final_filter.tab', sep="\t")
     meta = pd.read_csv('../prism2/stata/full_meta_grant_version.tab', sep="\t", low_memory=False)
     labels = pd.read_csv('temp/labels.tab', sep="\t")
 
-    bl = BootstrapCID(meta)
+    bl = BootstrapCID(labels)
+
+
+    total = []
+    for b_labels in bl.getIter(100):
+        foi = FOI(b_labels, meta)
+        full = foi.fit(group=None)
+        total.append(full)
+
+    bs_foi = pd.concat(total)
+
+    labels = InfectionLabeler(sdo, meta).LabelInfections()
+    true_foi = FOI(labels, meta).fit()
+
+
 
 
 if __name__ == '__main__':
     # dev_infectionLabeler()
     # dev_FOI()
-    dev_BoostrapLabels()
+    dev_BootstrapLabels()
