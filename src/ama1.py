@@ -1417,6 +1417,38 @@ class FOI:
             )
 
         return foi
+class BootstrapCID:
+    """
+    Perform bootstrapping on a dataframe by cohortid
+    requires : `cohortid` as column
+    """
+    def __init__(self, dataframe):
+        self.frame = dataframe.set_index('cohortid')
+        self.cid = self.frame.index.unique()
+    def sampleCID(self, size = 0, replace=True):
+        """
+        Random choice of COI in set
+        """
+        if size == 0:
+            size = self.cid.size
+        return np.random.choice(self.cid, size, replace=replace)
+
+    def getSample(self, size=0):
+        """
+        Select cohortids found in sampling and return
+        """
+        bootstrap = self.frame.loc[self.sampleCID()].\
+            reset_index()
+        return bootstrap
+    def getIter(self, num_iter=100):
+        """
+        Iterable generator for bootstraps
+        """
+        for _ in np.arange(num_iter):
+            yield self.getSample()
+
+
+
 
 def dev_infectionLabeler():
     sdo = pd.read_csv('../prism2/full_prism2/final_filter.tab', sep="\t")
@@ -1430,8 +1462,8 @@ def dev_FOI():
     sdo = pd.read_csv('../prism2/full_prism2/final_filter.tab', sep="\t")
     meta = pd.read_csv('../prism2/stata/full_meta_grant_version.tab', sep="\t", low_memory=False)
 
-    # il = InfectionLabeler(sdo, meta, qpcr_threshold=0)
-    # infection_labels = il.LabelInfections()
+    il = InfectionLabeler(sdo, meta, qpcr_threshold=0)
+    infection_labels = il.LabelInfections()
     # infection_labels.to_csv('temp/labels.tab', sep="\t", index=False)
 
     labels = pd.read_csv('temp/labels.tab', sep="\t")
@@ -1440,8 +1472,14 @@ def dev_FOI():
     grouped = foi.fit(group = ['agecat', 'gender'])
     full = foi.fit(group=None)
 
+def dev_BoostrapLabels():
+    meta = pd.read_csv('../prism2/stata/full_meta_grant_version.tab', sep="\t", low_memory=False)
+    labels = pd.read_csv('temp/labels.tab', sep="\t")
 
+    bl = BootstrapCID(meta)
 
 
 if __name__ == '__main__':
-    dev_FOI()
+    # dev_infectionLabeler()
+    # dev_FOI()
+    dev_BoostrapLabels()
