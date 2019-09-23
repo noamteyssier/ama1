@@ -1040,13 +1040,14 @@ class InfectionLabeler:
     """
     Label Infection events given a qpcr threshold, burnin period, and allowed skips
     """
-    def __init__(self, sdo, meta, qpcr_threshold = 0, burnin=3, allowedSkips = 3):
+    def __init__(self, sdo, meta, qpcr_threshold = 0, burnin=3, allowedSkips = 3, by_individual=False):
 
         self.sdo = sdo
         self.meta = meta
         self.qpcr_threshold = qpcr_threshold
         self.burnin = burnin
         self.allowedSkips = allowedSkips
+        self.by_individual = by_individual
 
         # post processed sdo + meta
         self.frame = pd.DataFrame()
@@ -1179,6 +1180,38 @@ class InfectionLabeler:
             skip_arr.append(skips)
 
         return np.array(skip_arr)
+    def SkipsByHaplotype(self, hid_timelines, cid, post_burnin):
+        """
+        Calculate Skips for each haplotype given an HID_timeline
+        """
+        # get positional difference between all passing qpcr events
+        for hid, hid_frame in hid_timelines.groupby('h_popUID'):
+
+            skips = self.positionalDifference(hid_frame.values[0], post_burnin)
+            dates = hid_frame.columns[hid_frame.values[0]]
+            visit_numbers = np.where(hid_frame.columns.isin(dates))[0]
+
+            if skips.size > 0:
+                self.skip_frame.append(
+                    [[cid, hid, dates[i], skips[i], visit_numbers[i]]
+                    for i,_ in enumerate(skips)]
+                )
+    def SkipsByIndividual(self, hid_timelines, cid, post_burnin):
+        """
+        Calculate Skips for an individual given an HID_timeline
+        """
+        if hid_timelines.shape[0] == 0 :
+            return
+        timeline = hid_timelines.values.max(axis=0)
+        skips = self.positionalDifference(timeline, post_burnin)
+        cid_dates = hid_timelines.columns[timeline]
+        visit_numbers = np.where(timeline)[0]
+
+        if skips.size > 0:
+            self.skip_frame.append(
+                [[cid, 'agg_{}'.format(cid), cid_dates[i], skips[i], visit_numbers[i]]
+                for i,_ in enumerate(skips)]
+            )
     def LabelSkips(self):
         """
         - Build timelines for each h_popUID~cohortid combination
@@ -1187,7 +1220,7 @@ class InfectionLabeler:
         - Compile dataframe of skips and visit number
         """
 
-        skip_frame = []
+        self.skip_frame = []
         for cid, cid_frame in tqdm(self.frame.groupby(['cohortid']), desc='calculating skips'):
             burnin = cid_frame.burnin.values[0]
 
@@ -1207,23 +1240,14 @@ class InfectionLabeler:
             hid_timelines = cid_timeline[cid_timeline.index != 'nan'].\
                 fillna(False)
 
-            # get positional difference between all passing qpcr events
-            for hid, hid_frame in hid_timelines.groupby('h_popUID'):
-
-                skips = self.positionalDifference(hid_frame.values[0], post_burnin)
-                dates = hid_frame.columns[hid_frame.values[0]]
-                visit_numbers = np.where(hid_frame.columns.isin(dates))[0]
-
-                if skips.size > 0:
-                    skip_frame.append(
-                        [[cid, hid, dates[i], skips[i], visit_numbers[i]]
-                        for i,_ in enumerate(skips)]
-                    )
-
+            if self.by_individual:
+                self.SkipsByIndividual(hid_timelines, cid, post_burnin)
+            else:
+                self.SkipsByHaplotype(hid_timelines, cid, post_burnin)
 
         # stack events, and build dataframe
         self.skips = pd.DataFrame(
-            np.vstack(skip_frame),
+            np.vstack(self.skip_frame),
             columns = ['cohortid', 'h_popUID', 'date', 'skips', 'visit_number']
             )
 
@@ -1270,9 +1294,19 @@ class InfectionLabeler:
         Label subsequence timepoints of infection events as active infections
         """
 
+        merging = ['cohortid', 'date']
+        subset = ['cohortid', 'date', 'enrolldate', 'burnin']
+        if not self.by_individual:
+            merging = merging + ['h_popUID']
+            subset = subset + ['h_popUID']
+
         self.labels = self.skips.merge(
-            self.frame[['cohortid', 'date', 'h_popUID', 'enrolldate', 'burnin']]
-            )
+            self.frame[subset],
+            left_on = merging,
+            right_on = merging,
+            how='inner'
+            ).drop_duplicates()
+
 
         self.labels['infection_event'] = self.labels.apply(
             lambda x : self.getLabel(x),
@@ -1484,9 +1518,14 @@ def dev_infectionLabeler():
     sdo = pd.read_csv('../prism2/full_prism2/final_filter.tab', sep="\t")
     meta = pd.read_csv('../prism2/stata/full_meta_grant_version.tab', sep="\t", low_memory=False)
 
-    il = InfectionLabeler(sdo, meta, qpcr_threshold=0)
+    il = InfectionLabeler(sdo, meta, qpcr_threshold=0, by_individual=False)
+    ili = InfectionLabeler(sdo, meta, qpcr_threshold=0, by_individual=True)
     infection_labels = il.LabelInfections()
+    individual_labels = ili.LabelInfections()
+
     print(infection_labels)
+    print(individual_labels)
+
 
 def dev_FOI():
     sdo = pd.read_csv('../prism2/full_prism2/final_filter.tab', sep="\t")
@@ -1525,6 +1564,6 @@ def dev_BootstrapLabels():
 
 
 if __name__ == '__main__':
-    # dev_infectionLabeler()
+    dev_infectionLabeler()
     # dev_FOI()
-    dev_BootstrapLabels()
+    # dev_BootstrapLabels()
