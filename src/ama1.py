@@ -1536,7 +1536,6 @@ def dev_infectionLabeler():
 
     il_impute = InfectionLabeler(sdo, meta, by_individual=True, impute_missing=True)
     il = InfectionLabeler(sdo, meta, by_individual=True, impute_missing=False)
-
 def dev_FOI():
     sdo = pd.read_csv('../prism2/full_prism2/final_filter.tab', sep="\t")
     meta = pd.read_csv('../prism2/stata/full_meta_grant_version.tab', sep="\t", low_memory=False)
@@ -1579,7 +1578,6 @@ def worker_foi(sdo, meta):
     foi = FOI(labels, meta)
     full = foi.fit(group=None)
     return full
-
 def multiprocess_FOI():
     sdo = pd.read_csv('../prism2/full_prism2/final_filter.tab', sep="\t")
     meta = pd.read_csv('../prism2/stata/full_meta_grant_version.tab', sep="\t", low_memory=False)
