@@ -1095,7 +1095,7 @@ class InfectionLabeler:
         """
         Keep samples above qpcr threshold (removes NaN as well)
         """
-        self.meta['pass_qpcr'] = self.meta.qpcr >= self.qpcr_threshold
+        self.meta['pass_qpcr'] = self.meta.qpcr > self.qpcr_threshold
     def MergeFrames(self):
         """
         - Merge seekdeep output and meta data
@@ -1230,16 +1230,20 @@ class InfectionLabeler:
                 index = 'h_popUID',
                 columns = 'date',
                 values = 'pass_qpcr'
-                )
+                ).\
+                fillna(False)
 
             try:
                 post_burnin = np.where(cid_timeline.columns >= burnin)[0].min()
             except ValueError:
                 post_burnin = False
 
-            # remove NaN h_popUID and fill pass_qpcr with False
-            hid_timelines = cid_timeline[cid_timeline.index != 'nan'].\
-                fillna(False)
+            # drop unknown haplotypes if not impute_missing
+            if self.by_individual and self.impute_missing:
+                hid_timelines = cid_timeline
+            else:
+                hid_timelines = cid_timeline[cid_timeline.index != 'nan']
+
 
             if self.by_individual:
                 self.SkipsByIndividual(hid_timelines, cid, post_burnin)
@@ -1530,18 +1534,8 @@ def dev_infectionLabeler():
     sdo = pd.read_csv('../prism2/full_prism2/final_filter.tab', sep="\t")
     meta = pd.read_csv('../prism2/stata/full_meta_grant_version.tab', sep="\t", low_memory=False)
 
-    il = InfectionLabeler(sdo, meta, by_individual=True)
-    infection_labels = il.LabelInfections()
-
-    # bootstrapped_meta = BootstrapCID(meta, seed=42).getSample()
-
-    # il = InfectionLabeler(sdo, bootstrapped_meta, qpcr_threshold=0, by_individual=True)
-    # infection_labels = il.LabelInfections()
-
-    #
-    # no_geno = il.meta[~il.meta.cohortid.isin(infection_labels.cohortid)]
-    # no_geno_past_burnin = no_geno[no_geno.date > no_geno.burnin]
-    # no_geno_past_burnin[no_geno_past_burnin.qpcr > 0][['cohortid', 'date']].groupby('cohortid').apply(lambda x : x.date.count())
+    il_impute = InfectionLabeler(sdo, meta, by_individual=True, impute_missing=True)
+    il = InfectionLabeler(sdo, meta, by_individual=True, impute_missing=False)
 
 def dev_FOI():
     sdo = pd.read_csv('../prism2/full_prism2/final_filter.tab', sep="\t")
@@ -1606,7 +1600,7 @@ def multiprocess_FOI():
     foi.fit()
 
 if __name__ == '__main__':
-    # dev_infectionLabeler()
+    dev_infectionLabeler()
     # dev_FOI()
     # dev_BootstrapLabels()
-    multiprocess_FOI()
+    # multiprocess_FOI()
