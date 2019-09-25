@@ -5,6 +5,9 @@ import pandas as pd
 from tqdm import *
 import itertools
 import sys
+from multiprocessing import *
+import seaborn as sns
+import matplotlib.pyplot as plt
 
 class HaplotypeUtils:
     def __init__(self, dist, sdo, meta):
@@ -1040,7 +1043,7 @@ class InfectionLabeler:
     """
     Label Infection events given a qpcr threshold, burnin period, and allowed skips
     """
-    def __init__(self, sdo, meta, qpcr_threshold = 0, burnin=3, allowedSkips = 3, by_individual=False):
+    def __init__(self, sdo, meta, qpcr_threshold = 0, burnin=3, allowedSkips = 3, by_individual=False, impute_missing=False):
 
         self.sdo = sdo
         self.meta = meta
@@ -1048,6 +1051,8 @@ class InfectionLabeler:
         self.burnin = burnin
         self.allowedSkips = allowedSkips
         self.by_individual = by_individual
+        self.impute_missing = impute_missing
+        self.is_bootstrap = False
 
         # post processed sdo + meta
         self.frame = pd.DataFrame()
@@ -1072,7 +1077,6 @@ class InfectionLabeler:
         self.sdo['cohortid'] = split_date_cid[:,-1].astype(int)
     def PrepareMeta(self):
         """
-        - Select necessary variables from meta data
         - Convert date to pd.datetime
         - Convert enrolldate to pd.datetime
         - Convert cohortid to int
@@ -1080,17 +1084,11 @@ class InfectionLabeler:
         - Add burnin date
         """
 
-        self.meta = self.meta[
-            ['date', 'cohortid', 'qpcr',
-            'agecat', 'enrolldate', 'malariacat',
-            'ageyrs', 'gender']
-            ]
-
         self.meta['date'] = pd.to_datetime(self.meta['date'])
         self.meta['enrolldate'] = pd.to_datetime(self.meta['enrolldate'])
         self.meta['cohortid'] = self.meta['cohortid'].astype(int)
 
-        self.meta.sort_values(by='date', inplace=True)
+        self.meta.sort_values(['cohortid', 'date'], inplace=True)
 
         return self.meta
     def MarkQPCR(self):
@@ -1110,6 +1108,9 @@ class InfectionLabeler:
             )
         self.frame['h_popUID'] = self.frame['h_popUID'].astype(str)
         self.frame.date = self.frame.date
+
+        if 'pseudo_cid' in self.frame.columns:
+            self.is_bootstrap = True
     def AddBurnin(self):
         """
         Generate burnin and add to Meta
@@ -1287,6 +1288,18 @@ class InfectionLabeler:
 
 
         return active_array
+    def getColumns(self):
+        """
+        Returns columns to merge on and columns to keep from frame
+        """
+        merging = ['cohortid', 'date']
+        to_keep = ['cohortid', 'date', 'enrolldate', 'burnin']
+        if not self.by_individual:
+            merging.append('h_popUID')
+            to_keep.append('h_popUID')
+        if self.is_bootstrap:
+            to_keep.append('pseudo_cid')
+        return merging, to_keep
     def LabelInfections(self):
         """
         Label timepoints as infection events
@@ -1294,26 +1307,22 @@ class InfectionLabeler:
         Label subsequence timepoints of infection events as active infections
         """
 
-        merging = ['cohortid', 'date']
-        subset = ['cohortid', 'date', 'enrolldate', 'burnin']
-        if not self.by_individual:
-            merging = merging + ['h_popUID']
-            subset = subset + ['h_popUID']
+        merging, to_keep = self.getColumns()
 
         self.labels = self.skips.merge(
-            self.frame[subset],
+            self.frame[to_keep],
             left_on = merging,
             right_on = merging,
             how='inner'
             ).drop_duplicates()
-
 
         self.labels['infection_event'] = self.labels.apply(
             lambda x : self.getLabel(x),
             axis = 1
             )
 
-        self.labels['active_infection'] = np.concatenate(self.labels.groupby(['cohortid', 'h_popUID']).apply(
+        active_id = 'pseudo_cid' if self.is_bootstrap else 'cohortid'
+        self.labels['active_infection'] = np.concatenate(self.labels.groupby([active_id, 'h_popUID']).apply(
             lambda x : self.ActiveInfection(x).astype(bool)
         ).values)
 
@@ -1343,9 +1352,11 @@ class FOI:
 
         self.AddBurnin()
 
-        meta_vals = ['cohortid', 'date', 'agecat', 'enrolldate', 'burnin', 'gender']
+        if 'pseudo_cid' in self.meta.columns:
+            self.is_bootstrap = True
+            self.labels = self.labels.drop(columns = 'pseudo_cid')
 
-        self.frame = self.meta[meta_vals].merge(
+        self.frame = self.meta.merge(
             self.labels,
             left_on = ['cohortid', 'date', 'enrolldate', 'burnin'],
             right_on = ['cohortid', 'date', 'enrolldate', 'burnin'],
@@ -1484,14 +1495,17 @@ class BootstrapCID:
         """
         Label multiple occurences of a Cohortid with a pseudonym
         """
+        group = ['cohortid', 'date']
 
-        group = ['cohortid', 'date', 'h_popUID']
-        cid_hap_date_id = bootstrap.groupby(group).apply(
+        pseudo_label = bootstrap.groupby(group).apply(
             lambda x : np.arange(x.shape[0])
         )
 
         bootstrap.sort_values(group, inplace=True)
-        bootstrap['pseudo_cid'] = bootstrap.cohortid.astype(str) + '_' + np.concatenate(cid_hap_date_id).astype(str)
+
+        bootstrap['pseudo_cid'] = bootstrap.cohortid.astype(str) + '_' + np.hstack(pseudo_label).astype(str)
+
+
         return bootstrap
     def getSample(self, size=0, pseudo_id=True):
         """
@@ -1512,20 +1526,22 @@ class BootstrapCID:
             yield self.getSample()
 
 
-
-
 def dev_infectionLabeler():
     sdo = pd.read_csv('../prism2/full_prism2/final_filter.tab', sep="\t")
     meta = pd.read_csv('../prism2/stata/full_meta_grant_version.tab', sep="\t", low_memory=False)
 
-    il = InfectionLabeler(sdo, meta, qpcr_threshold=0, by_individual=False)
-    ili = InfectionLabeler(sdo, meta, qpcr_threshold=0, by_individual=True)
+    il = InfectionLabeler(sdo, meta, by_individual=True)
     infection_labels = il.LabelInfections()
-    individual_labels = ili.LabelInfections()
 
-    print(infection_labels)
-    print(individual_labels)
+    # bootstrapped_meta = BootstrapCID(meta, seed=42).getSample()
 
+    # il = InfectionLabeler(sdo, bootstrapped_meta, qpcr_threshold=0, by_individual=True)
+    # infection_labels = il.LabelInfections()
+
+    #
+    # no_geno = il.meta[~il.meta.cohortid.isin(infection_labels.cohortid)]
+    # no_geno_past_burnin = no_geno[no_geno.date > no_geno.burnin]
+    # no_geno_past_burnin[no_geno_past_burnin.qpcr > 0][['cohortid', 'date']].groupby('cohortid').apply(lambda x : x.date.count())
 
 def dev_FOI():
     sdo = pd.read_csv('../prism2/full_prism2/final_filter.tab', sep="\t")
@@ -1540,30 +1556,57 @@ def dev_FOI():
 
     grouped = foi.fit(group = ['agecat', 'gender'])
     full = foi.fit(group=None)
-
 def dev_BootstrapLabels():
     sdo = pd.read_csv('../prism2/full_prism2/final_filter.tab', sep="\t")
     meta = pd.read_csv('../prism2/stata/full_meta_grant_version.tab', sep="\t", low_memory=False)
     labels = pd.read_csv('temp/labels.tab', sep="\t")
 
-    bl = BootstrapCID(labels)
+    bl = BootstrapCID(meta, seed=42)
 
 
     total = []
-    for b_labels in bl.getIter(100):
-        foi = FOI(b_labels, meta)
+    for b_meta in bl.getIter(100):
+        b_labels = InfectionLabeler(sdo, b_meta, by_individual=True).LabelInfections()
+        foi = FOI(b_labels, b_meta)
         full = foi.fit(group=None)
         total.append(full)
-
     bs_foi = pd.concat(total)
 
-    labels = InfectionLabeler(sdo, meta).LabelInfections()
-    true_foi = FOI(labels, meta).fit()
 
+    labels = InfectionLabeler(sdo, meta, by_individual=True).LabelInfections()
+    true_foi = FOI(labels, meta)
+    true_fit = true_foi.fit()
 
+    sns.distplot(bs_foi.FOI)
+    plt.axvline(true_foi.FOI[0])
 
+def worker_foi(sdo, meta):
+    labels = InfectionLabeler(sdo, meta, by_individual=True).LabelInfections()
+    foi = FOI(labels, meta)
+    full = foi.fit(group=None)
+    return full
+
+def multiprocess_FOI():
+    sdo = pd.read_csv('../prism2/full_prism2/final_filter.tab', sep="\t")
+    meta = pd.read_csv('../prism2/stata/full_meta_grant_version.tab', sep="\t", low_memory=False)
+
+    bl = BootstrapCID(meta, seed=42)
+
+    p = Pool(processes=7)
+    results = p.starmap(
+        worker_foi, [(sdo, bl.getSample()) for _ in range(100)]
+    )
+    results = pd.DataFrame(results)
+    print(results)
+
+    pd.DataFrame(np.vstack(results))[3].hist()
+
+    labels = InfectionLabeler(sdo, meta, by_individual=True).LabelInfections()
+    foi = FOI(labels, meta)
+    foi.fit()
 
 if __name__ == '__main__':
-    dev_infectionLabeler()
+    # dev_infectionLabeler()
     # dev_FOI()
     # dev_BootstrapLabels()
+    multiprocess_FOI()
