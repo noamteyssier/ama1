@@ -611,5 +611,5 @@ if __name__ == '__main__':
     pass
     # dev_infectionLabeler()
     # dev_FOI()
-    dev_BootstrapLabels()
+    # dev_BootstrapLabels()
     # multiprocess_FOI()
