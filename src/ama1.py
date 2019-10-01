@@ -351,8 +351,8 @@ class FOI:
 
         self.frame = self.meta.merge(
             self.labels,
-            left_on = ['pseudo_cid', 'date', 'enrolldate', 'burnin'],
-            right_on = ['pseudo_cid', 'date', 'enrolldate', 'burnin'],
+            left_on = ['cohortid', 'date', 'enrolldate', 'burnin'],
+            right_on = ['cohortid', 'date', 'enrolldate', 'burnin'],
             how = 'left'
             )
 
