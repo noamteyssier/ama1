@@ -28,7 +28,7 @@ def get_args():
         )
     p.add_argument('-f', '--force_of_infection',
         type=str,
-        help="Calculate the Force of Infection of the Population")
+        help="Calculate the Force of Infection of the Population (give grouping variables comma separated or write 'none' for no grouping)")
     p.add_argument('-n', '--allowedSkips',
         default = 3,
         type=int,
