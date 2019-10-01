@@ -8,6 +8,7 @@ import sys
 from multiprocessing import *
 import seaborn as sns
 import matplotlib.pyplot as plt
+sns.set(rc={'figure.figsize':(30, 30), 'lines.linewidth': 2})
 
 class InfectionLabeler:
     """
@@ -330,6 +331,32 @@ class FOI:
         self.is_bootstrap = False
 
         self.prepareData()
+    def prepareBootstrap(self):
+        """
+        Merge frames on pseudo cid if column found in either
+        """
+        self.is_bootstrap = True
+
+        # case where both have bootstrapped values
+        if ('pseudo_cid' not in self.meta.columns):
+            self.meta.pseudo_cid = self.meta.apply(
+                lambda x : str(x.cohortid) + '_0' if str(x.pseudo_cid) == 'nan' else x.pseudo_cid,
+                axis=1
+            )
+        if ('pseudo_cid' not in self.labels.columns):
+            self.labels.pseudo_cid = self.meta.apply(
+                lambda x : str(x.cohortid) + '_0' if str(x.pseudo_cid) == 'nan' else x.pseudo_cid,
+                axis=1
+            )
+
+        self.frame = self.meta.merge(
+            self.labels,
+            left_on = ['pseudo_cid', 'date', 'enrolldate', 'burnin'],
+            right_on = ['pseudo_cid', 'date', 'enrolldate', 'burnin'],
+            how = 'left'
+            )
+
+        return
     def prepareData(self):
         """
         validate column types
@@ -344,25 +371,17 @@ class FOI:
         self.meta.enrolldate = pd.to_datetime(self.meta.enrolldate)
 
         self.AddBurnin()
+        if ('pseudo_cid' in self.meta.columns) | ('pseudo_cid' in self.labels.columns):
+            self.prepareBootstrap()
 
-        if 'pseudo_cid' in self.meta.columns:
-            self.is_bootstrap = True
-            # self.labels = self.labels.drop(columns = 'pseudo_cid')
+        else:
+            self.frame = self.meta.merge(
+                self.labels,
+                left_on = ['cohortid', 'date', 'enrolldate', 'burnin'],
+                right_on = ['cohortid', 'date', 'enrolldate', 'burnin'],
+                how = 'left'
+                )
 
-        self.frame = self.meta.merge(
-            self.labels,
-            left_on = ['cohortid', 'date', 'enrolldate', 'burnin'],
-            right_on = ['cohortid', 'date', 'enrolldate', 'burnin'],
-            how = 'left'
-            )
-
-        # check if dataframe is a bootstrap, and use pseudo_cid instead of cid post merging
-        if 'pseudo_cid' in self.frame.columns:
-            self.is_bootstrap = True
-            self.frame['pseudo_cid'] = self.frame.apply(
-                lambda x : str(x.cohortid) + '_0' if str(x.pseudo_cid) == 'nan' else x.pseudo_cid,
-                axis=1
-            )
     def AddBurnin(self):
         """
         Generate burnin and add to Meta
@@ -464,7 +483,7 @@ class FOI:
                 columns = ['events', 'durations', 'exposure', 'FOI']
             )
 
-        return foi
+        return foi.reset_index()
 class BootstrapCID:
     """
     Perform bootstrapping on a dataframe by cohortid
@@ -537,42 +556,32 @@ def dev_FOI():
 
     grouped = foi.fit(group = ['agecat', 'gender'])
     full = foi.fit(group=None)
-def dev_BootstrapLabels():
+def dev_BootstrapCID():
     sdo = pd.read_csv('../prism2/full_prism2/final_filter.tab', sep="\t")
     meta = pd.read_csv('../prism2/stata/full_meta_grant_version.tab', sep="\t", low_memory=False)
     labels = pd.read_csv('temp/labels.tab', sep="\t")
 
     bl = BootstrapCID(meta, seed=42)
 
-
     total = []
-    for b_meta in bl.getIter(100):
-        b_labels = InfectionLabeler(sdo, b_meta, by_individual=True).LabelInfections()
+    for b_meta in bl.getIter(10):
+        b_labels = InfectionLabeler(sdo, b_meta).LabelInfections()
         foi = FOI(b_labels, b_meta)
         full = foi.fit(group=None)
         total.append(full)
     bs_foi = pd.concat(total)
 
-    b_meta = bl.getSample()
-    il = InfectionLabeler(sdo, b_meta, by_individual=True)
-    b_labels = il.LabelInfections()
-    b_labels[
-        (b_labels.date > b_labels.burnin)
-        ].infection_event.sum()
-
-    b_FOI = FOI(b_labels, b_meta)
-    b_FOI.fit()
 
     true_foi = FOI(labels, meta)
     true_fit = true_foi.fit()
 
     sns.distplot(bs_foi.FOI)
-    plt.axvline(true_foi.FOI[0])
+    plt.axvline(true_fit.FOI[0])
 
-def worker_foi(sdo, meta):
+def worker_foi(sdo, meta, group):
     labels = InfectionLabeler(sdo, meta, by_individual=True, impute_missing=True).LabelInfections()
     foi = FOI(labels, meta)
-    full = foi.fit(group=None)
+    full = foi.fit(group=group)
     return full
 def multiprocess_FOI():
     sdo = pd.read_csv('../prism2/full_prism2/final_filter.tab', sep="\t")
@@ -582,20 +591,25 @@ def multiprocess_FOI():
 
     p = Pool(processes=7)
 
-    bootstrapped_meta = [[sdo, bl.getSample()] for _ in tqdm(range(100))]
-    results = p.starmap(
-        worker_foi, bootstrapped_meta
-    )
+    group = ['gender']
+    bootstrapped_meta = [[sdo, bl.getSample(), group] for _ in tqdm(range(100))]
+    results = p.starmap(worker_foi, bootstrapped_meta)
 
-    pd.DataFrame(np.vstack(results))[3].hist()
+    bootstrapped_foi = pd.concat(results)
 
     labels = InfectionLabeler(sdo, meta, by_individual=True, impute_missing=True).LabelInfections()
     foi = FOI(labels, meta)
-    foi.fit()
+    true_foi = foi.fit(group=group)
+
+    for g, sub in bootstrapped_foi.groupby(group):
+        sns.distplot(sub.FOI.values, label=g)
+    [plt.axvline(val) for val in true_foi.FOI.values]
+    plt.legend()
+
 
 if __name__ == '__main__':
     pass
     # dev_infectionLabeler()
     # dev_FOI()
-    # dev_BootstrapLabels()
+    dev_BootstrapLabels()
     # multiprocess_FOI()
