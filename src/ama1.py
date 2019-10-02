@@ -3,12 +3,12 @@
 import numpy as np
 import pandas as pd
 from tqdm import *
-import itertools
-import sys
+import sys, math
+
 from multiprocessing import *
-import seaborn as sns
-import matplotlib.pyplot as plt
-sns.set(rc={'figure.figsize':(30, 30), 'lines.linewidth': 2})
+# import seaborn as sns
+# import matplotlib.pyplot as plt
+# sns.set(rc={'figure.figsize':(30, 30), 'lines.linewidth': 2})
 
 class InfectionLabeler:
     """
@@ -118,6 +118,21 @@ class InfectionLabeler:
         self.MarkQPCR()
         self.MergeFrames()
         self.LabelSkips()
+    def PostBurnin(self, dates, burnin):
+        """
+        Find first date past the burnin,
+        if burnin is between two visits mark postburnin as midway
+        """
+        try:
+            post_burnin = np.where(dates >= burnin)[0].min()
+        except ValueError:
+            return False
+
+
+        if dates[post_burnin] > burnin:
+            post_burnin -= 0.5
+
+        return post_burnin
     def positionalDifference(self, x, post_burnin):
         """
         For a bool array x : calculate number of skips between each truth
@@ -125,6 +140,7 @@ class InfectionLabeler:
         """
         truth = np.where(x)[0]
 
+        # no qpcr positive events
         if truth.size == 0:
             return np.array([])
 
@@ -134,18 +150,20 @@ class InfectionLabeler:
             # first occurence of a haplotype
             if i == 0:
 
-                # switch for burnin period
+                # make all skips zero pre burnin
                 if pos < post_burnin:
-                    skips = pos
+                    skips = 0
+
+                # first visit after burnin is equal to visit number
                 else:
-                    skips = pos - post_burnin
+                    skips = pos
 
 
+            # every other occurence
             else:
-
                 # disregard pre-burnin skips
                 if (truth[i - 1] < post_burnin) & (pos >= post_burnin):
-                    skips = pos - post_burnin
+                    skips = pos - math.ceil(post_burnin)
 
                 # calculate skips in pre-burnin period
                 else:
@@ -154,10 +172,18 @@ class InfectionLabeler:
             skip_arr.append(skips)
 
         return np.array(skip_arr)
+    def DropEmptyGenotyping(self, cid_timeline):
+        """
+        Remove empty genotyping results with positive qpcr
+        """
+        return cid_timeline[
+            cid_timeline.index != 'nan'
+            ]
     def SkipsByHaplotype(self, hid_timelines, cid, post_burnin):
         """
         Calculate Skips for each haplotype given an HID_timeline
         """
+
         # get positional difference between all passing qpcr events
         for hid, hid_frame in hid_timelines.groupby('h_popUID'):
 
@@ -225,18 +251,12 @@ class InfectionLabeler:
                 ).\
                 fillna(False)
 
-            try:
-                post_burnin = np.where(cid_timeline.columns >= burnin)[0].min()
-            except ValueError:
-                post_burnin = False
-
-            # drop unknown haplotypes if not impute_missing
             if self.by_infection_event and self.impute_missing:
-                hid_timelines = cid_timeline
-            else:
-                hid_timelines = cid_timeline[cid_timeline.index != 'nan']
+                cid_timeline = self.DropEmptyGenotyping()
 
-            self.SkipsByHaplotype(hid_timelines, cid, post_burnin)
+            post_burnin = self.PostBurnin(cid_timeline.columns, burnin)
+
+            self.SkipsByHaplotype(cid_timeline, cid, post_burnin)
 
         # stack events, and build dataframe
         self.skips = pd.DataFrame(
@@ -558,8 +578,9 @@ def dev_infectionLabeler():
     sdo = pd.read_csv('../prism2/full_prism2/final_filter.tab', sep="\t")
     meta = pd.read_csv('../prism2/stata/full_meta_grant_version.tab', sep="\t", low_memory=False)
 
-    il = InfectionLabeler(sdo, meta, by_infection_event=True, impute_missing=True, qpcr_threshold=0)
-    il.LabelInfections()
+    il = InfectionLabeler(sdo, meta, by_infection_event=False, impute_missing=False, qpcr_threshold=0, burnin=3)
+    labels = il.LabelInfections()
+
     # il_impute = InfectionLabeler(sdo, meta, by_infection_event=True, impute_missing=True)
     # il = InfectionLabeler(sdo, meta, by_infection_event=True, impute_missing=False)
 def dev_FOI():
