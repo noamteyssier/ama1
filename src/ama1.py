@@ -14,14 +14,14 @@ class InfectionLabeler:
     """
     Label Infection events given a qpcr threshold, burnin period, and allowed skips
     """
-    def __init__(self, sdo, meta, qpcr_threshold = 0, burnin=3, allowedSkips = 3, by_individual=False, impute_missing=False):
+    def __init__(self, sdo, meta, qpcr_threshold = 0, burnin=3, allowedSkips = 3, by_infection_event=False, impute_missing=False):
 
         self.sdo = sdo
         self.meta = meta
         self.qpcr_threshold = qpcr_threshold
         self.burnin = burnin
         self.allowedSkips = allowedSkips
-        self.by_individual = by_individual
+        self.by_infection_event = by_infection_event
         self.impute_missing = impute_missing
         self.is_bootstrap = False
 
@@ -186,6 +186,24 @@ class InfectionLabeler:
                 [[cid, 'agg_{}'.format(cid), cid_dates[i], skips[i], visit_numbers[i]]
                 for i,_ in enumerate(skips)]
             )
+    def AggregateByInfectionEvent(self):
+        """
+        Aggregate infection events by date, relabel h_popUID as aggregate over id~date
+        """
+
+        rows = []
+        for cid_date, cid_date_frame in self.labels.groupby(['cohortid', 'date']):
+            cid, date = cid_date
+            agg_name = 'agg_{}_{}'.format(cid, date.date())
+
+            rows.append([
+                cid, agg_name, date,
+                cid_date_frame.skips.max(), cid_date_frame.visit_number.min(),
+                cid_date_frame.enrolldate.min(), cid_date_frame.burnin.min(),
+                cid_date_frame.infection_event.max()
+            ])
+
+        self.labels = pd.DataFrame(rows, columns = self.labels.columns)
     def LabelSkips(self):
         """
         - Build timelines for each h_popUID~cohortid combination
@@ -213,16 +231,12 @@ class InfectionLabeler:
                 post_burnin = False
 
             # drop unknown haplotypes if not impute_missing
-            if self.by_individual and self.impute_missing:
+            if self.by_infection_event and self.impute_missing:
                 hid_timelines = cid_timeline
             else:
                 hid_timelines = cid_timeline[cid_timeline.index != 'nan']
 
-
-            if self.by_individual:
-                self.SkipsByIndividual(hid_timelines, cid, post_burnin)
-            else:
-                self.SkipsByHaplotype(hid_timelines, cid, post_burnin)
+            self.SkipsByHaplotype(hid_timelines, cid, post_burnin)
 
         # stack events, and build dataframe
         self.skips = pd.DataFrame(
@@ -272,7 +286,7 @@ class InfectionLabeler:
         """
         merging = ['cohortid', 'date']
         to_keep = ['cohortid', 'date', 'enrolldate', 'burnin']
-        if not self.by_individual:
+        if not self.by_infection_event:
             merging.append('h_popUID')
             to_keep.append('h_popUID')
         if self.is_bootstrap:
@@ -315,8 +329,11 @@ class InfectionLabeler:
             axis = 1
             )
 
+        if self.by_infection_event:
+            self.AggregateByInfectionEvent()
+
         active_id = 'pseudo_cid' if self.is_bootstrap else 'cohortid'
-        self.labels['active_infection'] = np.concatenate(self.labels.groupby([active_id, 'h_popUID']).apply(
+        self.labels['active_new_infection'] = np.concatenate(self.labels.groupby([active_id, 'h_popUID']).apply(
             lambda x : self.ActiveInfection(x).astype(bool)
         ).values)
 
@@ -541,8 +558,10 @@ def dev_infectionLabeler():
     sdo = pd.read_csv('../prism2/full_prism2/final_filter.tab', sep="\t")
     meta = pd.read_csv('../prism2/stata/full_meta_grant_version.tab', sep="\t", low_memory=False)
 
-    il_impute = InfectionLabeler(sdo, meta, by_individual=True, impute_missing=True)
-    il = InfectionLabeler(sdo, meta, by_individual=True, impute_missing=False)
+    il = InfectionLabeler(sdo, meta, by_infection_event=True, impute_missing=True, qpcr_threshold=0)
+    il.LabelInfections()
+    # il_impute = InfectionLabeler(sdo, meta, by_infection_event=True, impute_missing=True)
+    # il = InfectionLabeler(sdo, meta, by_infection_event=True, impute_missing=False)
 def dev_FOI():
     sdo = pd.read_csv('../prism2/full_prism2/final_filter.tab', sep="\t")
     meta = pd.read_csv('../prism2/stata/full_meta_grant_version.tab', sep="\t", low_memory=False)
@@ -577,9 +596,8 @@ def dev_BootstrapCID():
 
     sns.distplot(bs_foi.FOI)
     plt.axvline(true_fit.FOI[0])
-
 def worker_foi(sdo, meta, group):
-    labels = InfectionLabeler(sdo, meta, by_individual=True, impute_missing=True).LabelInfections()
+    labels = InfectionLabeler(sdo, meta, by_infection_event=True, impute_missing=True).LabelInfections()
     foi = FOI(labels, meta)
     full = foi.fit(group=group)
     return full
@@ -597,7 +615,7 @@ def multiprocess_FOI():
 
     bootstrapped_foi = pd.concat(results)
 
-    labels = InfectionLabeler(sdo, meta, by_individual=True, impute_missing=True).LabelInfections()
+    labels = InfectionLabeler(sdo, meta, by_infection_event=True, impute_missing=True).LabelInfections()
     foi = FOI(labels, meta)
     true_foi = foi.fit(group=group)
 
@@ -606,10 +624,9 @@ def multiprocess_FOI():
     [plt.axvline(val) for val in true_foi.FOI.values]
     plt.legend()
 
-
 if __name__ == '__main__':
+    dev_infectionLabeler()
     pass
-    # dev_infectionLabeler()
     # dev_FOI()
     # dev_BootstrapLabels()
     # multiprocess_FOI()
