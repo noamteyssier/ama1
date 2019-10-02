@@ -47,7 +47,7 @@ def get_args():
         required=False,
         help="qpcr threshold to consider a sample (set to 0 for no threshold)"
         )
-    p.add_argument('-c', '--by_individual',
+    p.add_argument('-c', '--by_infection_event',
         action='store_true',
         required=False,
         help='Collapse infection events by individual'
@@ -77,7 +77,7 @@ def label_infections(sdo, meta, args):
         qpcr_threshold = args.qpcr_threshold,
         burnin = args.burnin,
         allowedSkips = args.allowedSkips,
-        by_individual = args.by_individual,
+        by_infection_event = args.by_infection_event,
         impute_missing = args.no_impute
     )
 
@@ -90,11 +90,16 @@ def foi(sdo, meta, args):
         group = None
 
     else:
-        given_groupings = np.array([g in meta.columns for g in group])
+        known_groupings = set(meta.columns)
+        known_groupings.add('year_month')
+
+        known_groupings = np.array([i for i in known_groupings])
+
+        given_groupings = np.array([g in known_groupings for g in group])
         if np.any(~given_groupings):
             print('Error :')
             print("\nunknown values in given set : \n", group)
-            print('\navailable groupings : \n', meta.columns.values)
+            print('\navailable groupings : \n', np.sort(known_groupings))
             print('\nor "none" for no grouping')
             sys.exit()
 
@@ -103,7 +108,7 @@ def foi(sdo, meta, args):
         qpcr_threshold = args.qpcr_threshold,
         burnin = args.burnin,
         allowedSkips = args.allowedSkips,
-        by_individual = args.by_individual,
+        by_infection_event = args.by_infection_event,
         impute_missing = args.no_impute
     )
 

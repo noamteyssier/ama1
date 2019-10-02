@@ -6,9 +6,9 @@ from tqdm import *
 import sys, math
 
 from multiprocessing import *
-# import seaborn as sns
-# import matplotlib.pyplot as plt
-# sns.set(rc={'figure.figsize':(30, 30), 'lines.linewidth': 2})
+import seaborn as sns
+import matplotlib.pyplot as plt
+sns.set(rc={'figure.figsize':(30, 30), 'lines.linewidth': 2})
 
 class InfectionLabeler:
     """
@@ -252,7 +252,7 @@ class InfectionLabeler:
                 fillna(False)
 
             if self.by_infection_event and self.impute_missing:
-                cid_timeline = self.DropEmptyGenotyping()
+                cid_timeline = self.DropEmptyGenotyping(cid_timeline)
 
             post_burnin = self.PostBurnin(cid_timeline.columns, burnin)
 
@@ -419,7 +419,6 @@ class FOI:
                 right_on = ['cohortid', 'date', 'enrolldate', 'burnin'],
                 how = 'left'
                 )
-
     def AddBurnin(self):
         """
         Generate burnin and add to Meta
