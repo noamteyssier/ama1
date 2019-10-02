@@ -406,6 +406,7 @@ class FOI:
 
         self.meta.date = pd.to_datetime(self.meta.date)
         self.meta.enrolldate = pd.to_datetime(self.meta.enrolldate)
+        self.meta['year_month'] = pd.DatetimeIndex(self.meta.date).to_period('M')
 
         self.AddBurnin()
         if ('pseudo_cid' in self.meta.columns) | ('pseudo_cid' in self.labels.columns):
@@ -587,15 +588,16 @@ def dev_FOI():
     sdo = pd.read_csv('../prism2/full_prism2/final_filter.tab', sep="\t")
     meta = pd.read_csv('../prism2/stata/full_meta_grant_version.tab', sep="\t", low_memory=False)
 
-    il = InfectionLabeler(sdo, meta, qpcr_threshold=0)
-    infection_labels = il.LabelInfections()
+    # il = InfectionLabeler(sdo, meta, qpcr_threshold=0)
+    # infection_labels = il.LabelInfections()
     # infection_labels.to_csv('temp/labels.tab', sep="\t", index=False)
 
     labels = pd.read_csv('temp/labels.tab', sep="\t")
     foi = FOI(labels, meta)
+    full = foi.fit(group = ['year_month', 'gender', 'agecat'])
 
-    grouped = foi.fit(group = ['agecat', 'gender'])
-    full = foi.fit(group=None)
+    # grouped = foi.fit(group = ['agecat', 'gender'])
+    # full = foi.fit(group=None)
 def dev_BootstrapCID():
     sdo = pd.read_csv('../prism2/full_prism2/final_filter.tab', sep="\t")
     meta = pd.read_csv('../prism2/stata/full_meta_grant_version.tab', sep="\t", low_memory=False)
@@ -646,8 +648,8 @@ def multiprocess_FOI():
     plt.legend()
 
 if __name__ == '__main__':
-    dev_infectionLabeler()
-    pass
+    # dev_infectionLabeler()
     # dev_FOI()
+    pass
     # dev_BootstrapLabels()
     # multiprocess_FOI()
