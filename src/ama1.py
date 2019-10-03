@@ -178,16 +178,28 @@ class InfectionLabeler:
             skip_arr.append(skips)
 
         return np.array(skip_arr)
-    def BuildTimeline(self, cid_frame, values='pass_qpcr'):
+    def BuildTimeline(self, cid_frame, index='h_popUID', column = 'date', value='pass_qpcr'):
         """
-        Convert long-form table to wide form
+        Awesome numpy pivot function found @
+        https://stackoverflow.com/questions/48527091/efficiently-and-simply-convert-from-long-format-to-wide-format-in-pandas-and-or
         """
-        return cid_frame.pivot_table(
-            index = 'h_popUID',
-            columns = 'date',
-            values = values
-            ).\
-            fillna(False)
+        arr = cid_frame.values
+        idx_index, idx_column, idx_value = [np.where(cid_frame.columns == v)[0] for v in [index, column, value]]
+
+
+        rows, row_pos = np.unique(arr[:, idx_index], return_inverse=True)
+        cols, col_pos = np.unique(arr[:, idx_column], return_inverse=True)
+        pivot_arr = np.zeros((rows.size, cols.size))
+        pivot_arr[row_pos, col_pos] = arr[:, idx_value[0]]
+
+        frame = pd.DataFrame(
+            pivot_arr,
+            columns = cols,
+            index = rows,
+            dtype=bool
+            )
+        frame.index.name = index
+        return frame
     def DropEmptyGenotyping(self, cid_timeline):
         """
         Have qpcr row inherit genotyping passing qpcr
@@ -258,10 +270,10 @@ class InfectionLabeler:
         - aggregate events not passing skips
         """
 
-        for cid, cid_frame in self.labels.groupby(['cohortid']):
+        for cid, cid_frame in tqdm(self.labels.groupby(['cohortid']), desc='aggregating infection events'):
 
             # build infection event dataframe
-            hid_frame = self.BuildTimeline(cid_frame, values = 'infection_event')
+            hid_frame = self.BuildTimeline(cid_frame, value = 'infection_event')
 
             # fill missing dates
             missing_dates = self.id_dates[cid][
@@ -298,7 +310,7 @@ class InfectionLabeler:
 
             if self.haplodrops:
                 self.plot_haplodrop(
-                    self.BuildTimeline(self.labels[self.labels.cohortid == cid], values='infection_event'),
+                    self.BuildTimeline(self.labels[self.labels.cohortid == cid], value='infection_event'),
                     save=cid,
                     prefix='aggIE'
                 )
@@ -312,6 +324,7 @@ class InfectionLabeler:
 
         self.skip_frame = []
         cid_group = 'cohortid' if not self.is_bootstrap else 'pseudo_cid'
+
         for cid, cid_frame in tqdm(self.frame.groupby([cid_group]), desc='calculating skips'):
             burnin = cid_frame.burnin.values[0]
             self.id_dates[cid] = cid_frame.date.unique()
