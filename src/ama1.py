@@ -123,7 +123,6 @@ class InfectionLabeler:
         self.AddBurnin()
         self.MarkQPCR()
         self.MergeFrames()
-        self.LabelSkips()
     def PostBurnin(self, dates, burnin):
         """
         Find first date past the burnin,
@@ -231,22 +230,41 @@ class InfectionLabeler:
                     [[cid, hids[idx], hid_dates[idx_skips], skips[idx_skips], visit_numbers[idx_skips]]
                     for idx_skips,_ in enumerate(skips)]
                 )
-    def SkipsByIndividual(self, hid_timelines, cid, post_burnin):
+    def CalculateSkips(self):
         """
-        Calculate Skips for an individual given an HID_timeline
+        - Build timelines for each h_popUID~cohortid combination
+        - Calculate number of skips between each passing qpcr event
+        - Calculate visit number of events
+        - Compile dataframe of skips and visit number
         """
-        if hid_timelines.shape[0] == 0 :
-            return
-        timeline = hid_timelines.values.max(axis=0)
-        skips = self.PositionalDifference(timeline, post_burnin)
-        cid_dates = hid_timelines.columns[timeline]
-        visit_numbers = np.where(timeline)[0]
 
-        if skips.size > 0:
-            self.skip_frame.append(
-                [[cid, 'agg_{}'.format(cid), cid_dates[i], skips[i], visit_numbers[i]]
-                for i,_ in enumerate(skips)]
+        self.skip_frame = []
+        cid_group = 'cohortid' if not self.is_bootstrap else 'pseudo_cid'
+        # self.frame = self.frame[self.frame.cohortid == '3786']
+
+        for cid, cid_frame in tqdm(self.frame.groupby([cid_group]), desc='calculating skips'):
+            burnin = cid_frame.burnin.values[0]
+            self.id_dates[cid] = cid_frame.date.unique()
+
+            # convert long dates to wide
+            cid_timeline = self.BuildTimeline(cid_frame)
+
+            # no genotyping inherit qpcr + drop qpcr if not by_infection_event or not impute_missing
+            cid_timeline = self.DropEmptyGenotyping(cid_timeline)
+
+            post_burnin = self.PostBurnin(cid_timeline.columns, burnin)
+
+            self.SkipsByHaplotype(cid_timeline, cid, post_burnin)
+
+            if self.haplodrops:
+                self.plot_haplodrop(cid_timeline, save=cid)
+
+        self.skips = pd.DataFrame(
+            np.vstack(self.skip_frame),
+            columns = ['cohortid', 'h_popUID', 'date', 'skips', 'visit_number']
             )
+
+        self.skips.date = pd.to_datetime(self.skips.date)
     def AggregateInfectionEventDate(self):
         """
         Aggregate infection events by date, relabel h_popUID as aggregate over id~date
@@ -288,7 +306,6 @@ class InfectionLabeler:
             # sort columns by date
             hid_frame = hid_frame.loc[:,np.sort(hid_frame.columns.values)]
 
-
             # all infection events
             infection_points = hid_frame.max(axis=0)
 
@@ -317,41 +334,15 @@ class InfectionLabeler:
                     save=cid,
                     prefix='aggIE'
                 )
-    def LabelSkips(self):
+    def AggregateInfections(self):
         """
-        - Build timelines for each h_popUID~cohortid combination
-        - Calculate number of skips between each passing qpcr event
-        - Calculate visit number of events
-        - Compile dataframe of skips and visit number
+        Perform aggregation depending on flags given
         """
+        if self.by_infection_event:
+            self.AggregateInfectionEventDate()
 
-        self.skip_frame = []
-        cid_group = 'cohortid' if not self.is_bootstrap else 'pseudo_cid'
-        # self.frame = self.frame[self.frame.cohortid == '3786']
-
-        for cid, cid_frame in tqdm(self.frame.groupby([cid_group]), desc='calculating skips'):
-            burnin = cid_frame.burnin.values[0]
-            self.id_dates[cid] = cid_frame.date.unique()
-
-            # convert long dates to wide
-            cid_timeline = self.BuildTimeline(cid_frame)
-
-            # no genotyping inherit qpcr + drop qpcr if not by_infection_event or not impute_missing
-            cid_timeline = self.DropEmptyGenotyping(cid_timeline)
-
-            post_burnin = self.PostBurnin(cid_timeline.columns, burnin)
-
-            self.SkipsByHaplotype(cid_timeline, cid, post_burnin)
-
-            if self.haplodrops:
-                self.plot_haplodrop(cid_timeline, save=cid)
-
-        self.skips = pd.DataFrame(
-            np.vstack(self.skip_frame),
-            columns = ['cohortid', 'h_popUID', 'date', 'skips', 'visit_number']
-            )
-
-        self.skips.date = pd.to_datetime(self.skips.date)
+            if self.agg_infection_event:
+                self.AggregateInfectionEvents()
     def getLabel(self, row):
         """label infections as true or false"""
 
@@ -409,21 +400,13 @@ class InfectionLabeler:
                 ).values
             )
         self.labels['active_baseline_infection'] = (~self.labels.active_new_infection)
-    def AggregateInfections(self):
-        """
-        Perform aggregation depending on flags given
-        """
-        if self.by_infection_event:
-            self.AggregateInfectionEventDate()
-
-            if self.agg_infection_event:
-                self.AggregateInfectionEvents()
     def LabelInfections(self):
         """
         Label timepoints as infection events
         &
         Label subsequence timepoints of infection events as active infections
         """
+        self.CalculateSkips()
 
         merging, to_keep = self.getColumns()
 
