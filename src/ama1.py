@@ -15,11 +15,7 @@ class InfectionLabeler:
     Label Infection events given a qpcr threshold, burnin period, and allowed skips
     """
     pd.options.mode.chained_assignment = None
-    def __init__(
-        self, sdo, meta,
-        qpcr_threshold = 0, burnin=3, allowedSkips = 3,
-        by_infection_event=False, impute_missing=True,
-        agg_infection_event=True, haplodrops=False):
+    def __init__(self, sdo, meta, qpcr_threshold = 0, burnin=3, allowedSkips = 3, by_infection_event=False, impute_missing=True, agg_infection_event=True, haplodrops=False):
 
         self.sdo = sdo
         self.meta = meta
@@ -143,7 +139,7 @@ class InfectionLabeler:
             post_burnin -= 0.5
 
         return post_burnin
-    def positionalDifference(self, x, post_burnin):
+    def PositionalDifference(self, x, post_burnin):
         """
         For a bool array x : calculate number of skips between each truth
         calculate first truth with respect to the number of visits post burnin
@@ -194,11 +190,15 @@ class InfectionLabeler:
             fillna(False)
     def DropEmptyGenotyping(self, cid_timeline):
         """
+        Have qpcr row inherit genotyping passing qpcr
         Remove empty genotyping results with positive qpcr
         """
-        return cid_timeline[
-            cid_timeline.index != 'nan'
-            ]
+
+        cid_timeline.loc['nan'] = cid_timeline.max(axis=0)
+        if self.by_infection_event == False or self.impute_missing == False:
+            return cid_timeline[cid_timeline.index != 'nan']
+        else:
+            return cid_timeline
     def SkipsByHaplotype(self, hid_timelines, cid, post_burnin):
         """
         Calculate Skips for each haplotype given an HID_timeline
@@ -207,7 +207,7 @@ class InfectionLabeler:
         # get positional difference between all passing qpcr events
         for hid, hid_frame in hid_timelines.groupby('h_popUID'):
 
-            skips = self.positionalDifference(hid_frame.values[0], post_burnin)
+            skips = self.PositionalDifference(hid_frame.values[0], post_burnin)
             dates = hid_frame.columns[hid_frame.values[0]]
             visit_numbers = np.where(hid_frame.columns.isin(dates))[0]
 
@@ -223,7 +223,7 @@ class InfectionLabeler:
         if hid_timelines.shape[0] == 0 :
             return
         timeline = hid_timelines.values.max(axis=0)
-        skips = self.positionalDifference(timeline, post_burnin)
+        skips = self.PositionalDifference(timeline, post_burnin)
         cid_dates = hid_timelines.columns[timeline]
         visit_numbers = np.where(timeline)[0]
 
@@ -281,7 +281,7 @@ class InfectionLabeler:
             pos_infection = np.where(infection_points)[0]
 
             # skips between infection events
-            point_skips = self.positionalDifference(infection_points.values, 0)
+            point_skips = self.PositionalDifference(infection_points.values, 0)
 
             # skips past threshold
             passing_skips = np.where(point_skips > self.allowedSkips)[0]
@@ -310,24 +310,21 @@ class InfectionLabeler:
         - Compile dataframe of skips and visit number
         """
 
-        # self.frame = self.frame[self.frame.cohortid == '3786']
-
         self.skip_frame = []
         cid_group = 'cohortid' if not self.is_bootstrap else 'pseudo_cid'
         for cid, cid_frame in tqdm(self.frame.groupby([cid_group]), desc='calculating skips'):
             burnin = cid_frame.burnin.values[0]
+            self.id_dates[cid] = cid_frame.date.unique()
 
             # convert long dates to wide
             cid_timeline = self.BuildTimeline(cid_frame)
 
-            if not self.by_infection_event or not self.impute_missing:
-                cid_timeline = self.DropEmptyGenotyping(cid_timeline)
+            # no genotyping inherit qpcr + drop qpcr if not by_infection_event or not impute_missing
+            cid_timeline = self.DropEmptyGenotyping(cid_timeline)
 
             post_burnin = self.PostBurnin(cid_timeline.columns, burnin)
 
             self.SkipsByHaplotype(cid_timeline, cid, post_burnin)
-
-            self.id_dates[cid] = cid_timeline.columns.values
 
             if self.haplodrops:
                 self.plot_haplodrop(cid_timeline, save=cid)
@@ -425,9 +422,8 @@ class InfectionLabeler:
 
         if self.by_infection_event:
             self.AggregateInfectionEventDate()
-
-        if self.agg_infection_event:
-            self.AggregateInfectionEvents()
+            if self.agg_infection_event:
+                self.AggregateInfectionEvents()
 
         active_id = 'pseudo_cid' if self.is_bootstrap else 'cohortid'
         self.labels['active_new_infection'] = np.concatenate(
@@ -677,8 +673,16 @@ def dev_infectionLabeler():
     sdo = pd.read_csv('../prism2/full_prism2/final_filter.tab', sep="\t")
     meta = pd.read_csv('../prism2/stata/full_meta_grant_version.tab', sep="\t", low_memory=False)
 
-    il = InfectionLabeler(sdo, meta, by_infection_event=True, impute_missing=False, agg_infection_event=True, qpcr_threshold=0, burnin=2, haplodrops=False)
+    il = InfectionLabeler(sdo, meta,
+        by_infection_event=True, qpcr_threshold=0.1,
+        burnin=2, haplodrops=False)
     labels = il.LabelInfections()
+
+    ilc = InfectionLabeler(sdo, meta, burnin=2)
+    labels_clone = ilc.LabelInfections()
+
+    labels[labels.date <= pd.to_datetime('2019-04-01')].infection_event.sum()
+    labels_clone.infection_event.sum()
 
 def dev_FOI():
     sdo = pd.read_csv('../prism2/full_prism2/final_filter.tab', sep="\t")
@@ -693,8 +697,6 @@ def dev_FOI():
     labels.infection_event
     labels[labels.date <= pd.to_datetime('2019-04-01')].infection_event.sum()
 
-    # grouped = foi.fit(group = ['agecat', 'gender'])
-    # full = foi.fit(group=None)
 def dev_BootstrapCID():
     sdo = pd.read_csv('../prism2/full_prism2/final_filter.tab', sep="\t")
     meta = pd.read_csv('../prism2/stata/full_meta_grant_version.tab', sep="\t", low_memory=False)
