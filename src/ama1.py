@@ -18,8 +18,8 @@ class InfectionLabeler:
     def __init__(
         self, sdo, meta,
         qpcr_threshold = 0, burnin=3, allowedSkips = 3,
-        by_infection_event=False, impute_missing=False,
-        agg_infection_event=False, haplodrops=False):
+        by_infection_event=False, impute_missing=True,
+        agg_infection_event=True, haplodrops=False):
 
         self.sdo = sdo
         self.meta = meta
@@ -182,6 +182,16 @@ class InfectionLabeler:
             skip_arr.append(skips)
 
         return np.array(skip_arr)
+    def BuildTimeline(self, cid_frame, values='pass_qpcr'):
+        """
+        Convert long-form table to wide form
+        """
+        return cid_frame.pivot_table(
+            index = 'h_popUID',
+            columns = 'date',
+            values = values
+            ).\
+            fillna(False)
     def DropEmptyGenotyping(self, cid_timeline):
         """
         Remove empty genotyping results with positive qpcr
@@ -251,13 +261,7 @@ class InfectionLabeler:
         for cid, cid_frame in self.labels.groupby(['cohortid']):
 
             # build infection event dataframe
-            hid_frame = pd.pivot_table(
-                cid_frame,
-                index = 'h_popUID',
-                columns = 'date',
-                values = 'infection_event'
-                ).\
-                fillna(False)
+            hid_frame = self.BuildTimeline(cid_frame, values = 'infection_event')
 
             # fill missing dates
             missing_dates = self.id_dates[cid][
@@ -294,13 +298,7 @@ class InfectionLabeler:
 
             if self.haplodrops:
                 self.plot_haplodrop(
-                    pd.pivot_table(
-                        self.labels[self.labels.cohortid == cid],
-                        index = 'h_popUID',
-                        columns = 'date',
-                        values = 'infection_event'
-                        ).\
-                        fillna(False),
+                    self.BuildTimeline(self.labels[self.labels.cohortid == cid], values='infection_event'),
                     save=cid,
                     prefix='aggIE'
                 )
@@ -320,12 +318,7 @@ class InfectionLabeler:
             burnin = cid_frame.burnin.values[0]
 
             # convert long dates to wide
-            cid_timeline = cid_frame.pivot_table(
-                index = 'h_popUID',
-                columns = 'date',
-                values = 'pass_qpcr'
-                ).\
-                fillna(False)
+            cid_timeline = self.BuildTimeline(cid_frame)
 
             if not self.by_infection_event or not self.impute_missing:
                 cid_timeline = self.DropEmptyGenotyping(cid_timeline)
@@ -684,21 +677,21 @@ def dev_infectionLabeler():
     sdo = pd.read_csv('../prism2/full_prism2/final_filter.tab', sep="\t")
     meta = pd.read_csv('../prism2/stata/full_meta_grant_version.tab', sep="\t", low_memory=False)
 
-    il = InfectionLabeler(sdo, meta, by_infection_event=False, impute_missing=False, agg_infection_event=True, qpcr_threshold=0, burnin=3, haplodrops=True)
+    il = InfectionLabeler(sdo, meta, by_infection_event=True, impute_missing=False, agg_infection_event=True, qpcr_threshold=0, burnin=2, haplodrops=False)
     labels = il.LabelInfections()
-    print(labels)
 
 def dev_FOI():
     sdo = pd.read_csv('../prism2/full_prism2/final_filter.tab', sep="\t")
     meta = pd.read_csv('../prism2/stata/full_meta_grant_version.tab', sep="\t", low_memory=False)
+    # labels = InfectionLabeler(sdo, meta)
 
-    # il = InfectionLabeler(sdo, meta, qpcr_threshold=0)
-    # infection_labels = il.LabelInfections()
-    # infection_labels.to_csv('temp/labels.tab', sep="\t", index=False)
 
-    labels = pd.read_csv('temp/labels.tab', sep="\t")
-    foi = FOI(labels, meta)
-    full = foi.fit(group = ['year_month', 'gender', 'agecat'])
+    # labels = pd.read_csv('temp/labels.tab', sep="\t")
+    foi = FOI(labels, meta, burnin=2)
+
+    full = foi.fit(group = ['year_month'])
+    labels.infection_event
+    labels[labels.date <= pd.to_datetime('2019-04-01')].infection_event.sum()
 
     # grouped = foi.fit(group = ['agecat', 'gender'])
     # full = foi.fit(group=None)
@@ -754,6 +747,6 @@ def multiprocess_FOI():
 if __name__ == '__main__':
     dev_infectionLabeler()
     # dev_FOI()
-    pass
     # dev_BootstrapLabels()
     # multiprocess_FOI()
+    pass
