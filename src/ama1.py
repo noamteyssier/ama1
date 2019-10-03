@@ -131,6 +131,7 @@ class InfectionLabeler:
         """
         try:
             post_burnin = np.where(dates >= burnin)[0].min()
+
         except ValueError:
             return False
 
@@ -206,27 +207,29 @@ class InfectionLabeler:
         Remove empty genotyping results with positive qpcr
         """
 
-        cid_timeline.loc['nan'] = cid_timeline.max(axis=0)
         if self.by_infection_event == False or self.impute_missing == False:
             return cid_timeline[cid_timeline.index != 'nan']
         else:
+            cid_timeline.loc['nan'] = cid_timeline.max(axis=0)
             return cid_timeline
     def SkipsByHaplotype(self, hid_timelines, cid, post_burnin):
         """
         Calculate Skips for each haplotype given an HID_timeline
         """
 
-        # get positional difference between all passing qpcr events
-        for hid, hid_frame in hid_timelines.groupby('h_popUID'):
+        hids = hid_timelines.index
+        dates = hid_timelines.columns
 
-            skips = self.PositionalDifference(hid_frame.values[0], post_burnin)
-            dates = hid_frame.columns[hid_frame.values[0]]
-            visit_numbers = np.where(hid_frame.columns.isin(dates))[0]
+        for idx, hid_arr in enumerate(hid_timelines.values):
+
+            skips = self.PositionalDifference(hid_arr, post_burnin)
+            hid_dates = dates[hid_arr]
+            visit_numbers = np.where(hid_arr)[0]
 
             if skips.size > 0:
                 self.skip_frame.append(
-                    [[cid, hid, dates[i], skips[i], visit_numbers[i]]
-                    for i,_ in enumerate(skips)]
+                    [[cid, hids[idx], hid_dates[idx_skips], skips[idx_skips], visit_numbers[idx_skips]]
+                    for idx_skips,_ in enumerate(skips)]
                 )
     def SkipsByIndividual(self, hid_timelines, cid, post_burnin):
         """
@@ -324,6 +327,7 @@ class InfectionLabeler:
 
         self.skip_frame = []
         cid_group = 'cohortid' if not self.is_bootstrap else 'pseudo_cid'
+        # self.frame = self.frame[self.frame.cohortid == '3786']
 
         for cid, cid_frame in tqdm(self.frame.groupby([cid_group]), desc='calculating skips'):
             burnin = cid_frame.burnin.values[0]
@@ -342,7 +346,6 @@ class InfectionLabeler:
             if self.haplodrops:
                 self.plot_haplodrop(cid_timeline, save=cid)
 
-        # stack events, and build dataframe
         self.skips = pd.DataFrame(
             np.vstack(self.skip_frame),
             columns = ['cohortid', 'h_popUID', 'date', 'skips', 'visit_number']
@@ -702,7 +705,7 @@ def dev_infectionLabeler():
         by_infection_event=True, qpcr_threshold=0.1,
         burnin=2, haplodrops=False)
     labels = il.LabelInfections()
-    print(labels)
+    print(labels.infection_event.sum())
 
     # ilc = InfectionLabeler(sdo, meta, burnin=2)
     # labels_clone = ilc.LabelInfections()
