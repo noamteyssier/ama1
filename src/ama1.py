@@ -383,6 +383,25 @@ class InfectionLabeler:
         if self.is_bootstrap:
             to_keep.append('pseudo_cid')
         return merging, to_keep
+    def LabelActiveInfections(self):
+        """
+        Label active baseline and new infections
+        """
+        self.labels['active_new_infection'] = np.concatenate(
+            self.labels.groupby(['cohortid', 'h_popUID']).apply(
+                lambda x : self.ActiveInfection(x).astype(bool)
+                ).values
+            )
+        self.labels['active_baseline_infection'] = (~self.labels.active_new_infection)
+    def AggregateInfections(self):
+        """
+        Perform aggregation depending on flags given
+        """
+        if self.by_infection_event:
+            self.AggregateInfectionEventDate()
+
+            if self.agg_infection_event:
+                self.AggregateInfectionEvents()
     def LabelInfections(self):
         """
         Label timepoints as infection events
@@ -420,17 +439,8 @@ class InfectionLabeler:
             axis = 1
             )
 
-        if self.by_infection_event:
-            self.AggregateInfectionEventDate()
-            if self.agg_infection_event:
-                self.AggregateInfectionEvents()
-
-        active_id = 'pseudo_cid' if self.is_bootstrap else 'cohortid'
-        self.labels['active_new_infection'] = np.concatenate(
-            self.labels.groupby([active_id, 'h_popUID']).apply(
-                lambda x : self.ActiveInfection(x).astype(bool)
-                ).values
-            )
+        self.AggregateInfections()
+        self.LabelActiveInfections()
 
         return self.labels
     def plot_haplodrop(self, cid_timeline, save=False, prefix=None):
@@ -679,12 +689,14 @@ def dev_infectionLabeler():
         by_infection_event=True, qpcr_threshold=0.1,
         burnin=2, haplodrops=False)
     labels = il.LabelInfections()
+    print(labels)
 
-    ilc = InfectionLabeler(sdo, meta, burnin=2)
-    labels_clone = ilc.LabelInfections()
-
-    labels[labels.date <= pd.to_datetime('2019-04-01')].infection_event.sum()
-    labels_clone.infection_event.sum()
+    # ilc = InfectionLabeler(sdo, meta, burnin=2)
+    # labels_clone = ilc.LabelInfections()
+    # print(labels_clone)
+    #
+    # labels[labels.date <= pd.to_datetime('2019-04-01')].infection_event.sum()
+    # labels_clone.infection_event.sum()
 
 def dev_FOI():
     sdo = pd.read_csv('../prism2/full_prism2/final_filter.tab', sep="\t")
@@ -751,7 +763,7 @@ def multiprocess_FOI():
     plt.legend()
 
 if __name__ == '__main__':
-    # dev_infectionLabeler()
+    dev_infectionLabeler()
     # dev_FOI()
     # dev_BootstrapLabels()
     # multiprocess_FOI()
