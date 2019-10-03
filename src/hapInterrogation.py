@@ -14,14 +14,6 @@ def get_args():
     p.add_argument('-m', '--meta', required=False,
         default= "../prism2/stata/full_meta_6mo_fu.tab",
         help="Cohort Meta information (tsv) to relate cohortids")
-    # p.add_argument('-a', '--allele_frequency', action='store_true',
-    #     help="Calculate allele frequencies of haplotypes in the population")
-    # p.add_argument('-s', '--haplotype_skips', action='store_true',
-    #     help="Create a vector of the skips found in the population")
-    # p.add_argument('-g', '--new_infections', action='store_true',
-    #     help='Create a dataframe for the number of new infections of cohortid~h_popUID')
-    # p.add_argument('-d', '--durations', action='store_true',
-    #     help="Create a dataframe showing the duration of infection of each cohortid~h_popUID")
     p.add_argument('-l', '--label_infections',
         action='store_true',
         help="Create a dataframe showing the start and end of infection of each cohortid~h_popUID"
@@ -34,8 +26,6 @@ def get_args():
         type=int,
         help="Number of allowed skips to allow during calculation of durations (default = 3 skips)"
         )
-    # p.add_argument('-x', '--default_duration', default=15, type=int,
-    #     help="Default duration rate to use for single event infections (default = 15 days)")
     p.add_argument('-b', '--burnin',
         default=3,
         type=int,
@@ -47,7 +37,7 @@ def get_args():
         required=False,
         help="qpcr threshold to consider a sample (set to 0 for no threshold)"
         )
-    p.add_argument('-c', '--by_infection_event',
+    p.add_argument('--by_infection_event',
         action='store_true',
         required=False,
         help='Collapse infection events by individual'
@@ -55,10 +45,13 @@ def get_args():
     p.add_argument('--no_impute',
         action='store_false',
         required=False,
-        help='Dont impute missing haplotypes when collapsing by individuals (i.e. disregard no genotyping qpcr information when calculating skips)'
+        help='Dont impute missing haplotypes when collapsing by date '
         )
-    # p.add_argument('-q', '--fail_flag', action='store_false', default=True,
-    #     help="if no haplotypes are recovered and PCR is positive, drop sample (default=True, use flag to deactivate filter)")
+    p.add_argument('--no_aggregation',
+        action='store_false',
+        required=False,
+        help='Dont aggregate infection events following the skip rule when collapsing by date'
+        )
 
     # if no args given print help
     if len(sys.argv) == 1:
@@ -78,7 +71,8 @@ def label_infections(sdo, meta, args):
         burnin = args.burnin,
         allowedSkips = args.allowedSkips,
         by_infection_event = args.by_infection_event,
-        impute_missing = args.no_impute
+        impute_missing = args.no_impute,
+        agg_infection_event = args.no_aggregation
     )
 
     labels = il.LabelInfections()
@@ -109,7 +103,8 @@ def foi(sdo, meta, args):
         burnin = args.burnin,
         allowedSkips = args.allowedSkips,
         by_infection_event = args.by_infection_event,
-        impute_missing = args.no_impute
+        impute_missing = args.no_impute,
+        agg_infection_event = args.no_aggregation
     )
 
     labels = il.LabelInfections()

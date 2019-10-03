@@ -616,6 +616,7 @@ class FOI:
             )
 
         return foi.reset_index()
+
 class BootstrapCID:
     """
     Perform bootstrapping on a dataframe by cohortid
@@ -669,6 +670,7 @@ class BootstrapCID:
         for _ in tqdm(np.arange(num_iter)):
             yield self.getSample()
 
+
 def dev_infectionLabeler():
     sdo = pd.read_csv('../prism2/full_prism2/final_filter.tab', sep="\t")
     meta = pd.read_csv('../prism2/stata/full_meta_grant_version.tab', sep="\t", low_memory=False)
@@ -718,11 +720,13 @@ def dev_BootstrapCID():
 
     sns.distplot(bs_foi.FOI)
     plt.axvline(true_fit.FOI[0])
+
 def worker_foi(sdo, meta, group):
     labels = InfectionLabeler(sdo, meta, by_infection_event=True, impute_missing=True).LabelInfections()
     foi = FOI(labels, meta)
     full = foi.fit(group=group)
     return full
+
 def multiprocess_FOI():
     sdo = pd.read_csv('../prism2/full_prism2/final_filter.tab', sep="\t")
     meta = pd.read_csv('../prism2/stata/full_meta_grant_version.tab', sep="\t", low_memory=False)
@@ -747,7 +751,7 @@ def multiprocess_FOI():
     plt.legend()
 
 if __name__ == '__main__':
-    dev_infectionLabeler()
+    # dev_infectionLabeler()
     # dev_FOI()
     # dev_BootstrapLabels()
     # multiprocess_FOI()
