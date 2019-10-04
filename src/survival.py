@@ -136,7 +136,7 @@ class Survival:
             ]
     def BootstrapInfections(self, frame=None):
         """randomly sample with replacement on CID"""
-        if type(frame) != type(None):
+        if type(frame) == type(None):
             frame = self.original_infections.copy()
 
         c = frame.cohortid.unique().copy()
@@ -848,19 +848,24 @@ def SplitByAgecat(ageyrs_frame, breaks=[9, 20]):
 
 def develop():
     sdo = pd.read_csv('../prism2/full_prism2/final_filter.tab', sep="\t", low_memory=False)
-    meta = pd.read_csv('../prism2/stata/rolling_enrollment.tab', sep="\t", low_memory=False)
+    meta = pd.read_csv('../prism2/stata/full_meta_grant_version.tab', sep="\t", low_memory=False)
     sdu = SeekDeepUtils(
         sdo, meta
     )
 
     meta.columns.values
+    labels = sdu.Old_New_Infection_Labels()
+    labels.cohortid.unique().size
 
     survival = Survival(
-        sdu.Old_New_Infection_Labels(),
+        labels,
         sdu.meta
-    )
-    survival.RemoveTreated()
+        )
+    survival.original_infections
+    survival.Durations(bootstrap=True)
 
+
+    sys.exit()
     default_decay = ExponentialDecay(survival.original_infections)
     durations = default_decay.GetInfectionDurations(default_decay.infections)
     default_decay.fit(bootstrap=True, n_iter=100)
