@@ -775,45 +775,6 @@ class Survival(object):
 
         self.infections = self.infections.reset_index()
         self.infections['cohortid'] = new_cid
-    def OldWaning(self, bootstrap=False, n_iter=200):
-        """calculate fraction of old clones remaining across each month past the burnin (use october meta)"""
-        def monthly_kept(x):
-            """return number of old infections past burnin"""
-            monthly_old = x[(~x.active_new_infection) & (x.date >= x.burnin)]
-            return monthly_old[['cohortid', 'h_popUID']].drop_duplicates().shape[0]
-        def waning(df):
-            monthly_counts = df.groupby('year_month').apply(lambda x : monthly_kept(x))
-            return monthly_counts / monthly_counts.values.max()
-        def plot_wane(omc, boots=pd.DataFrame()):
-            # omc['year_month'] = [i.to_timestamp() for i in omc.year_month.values]
-            # omc['year_month'] = pd.to_datetime(omc['year_month'])
-            g = sns.lineplot(x = omc.index.to_timestamp(), y = omc.values, legend=False, lw=5)
-            if not boots.empty:
-                plt.fill_between(
-                    boots.index.to_timestamp(),
-                    y1=[i for i,j in boots.values],
-                    y2=[j for i,j in boots.values],
-                    alpha=0.3
-                    )
-            plt.xlabel('Date')
-            plt.title('Percentage')
-            plt.title('Fraction of Old Clones Remaining')
-            g.get_figure().savefig("../plots/survival/oldClones.pdf")
-            plt.show()
-            plt.close()
-
-        omc = waning(self.original_infections)
-        if bootstrap:
-            boots = []
-            for i in tqdm(range(n_iter), desc='bootstrapping'):
-                self.BootstrapInfections()
-                mc = waning(self.infections)
-                boots.append(mc)
-            boots = pd.concat(boots)
-            boots = boots.groupby(level = 0).apply(lambda x : np.percentile(x, [2.5, 97.5]))
-            plot_wane(omc, boots)
-        else:
-            plot_wane(omc)
 
 class FractionOldNew(Survival):
     """
@@ -995,6 +956,79 @@ class OldNewSurival(Survival):
         plt.title('Fraction of New and Old Clones by Individual')
         plt.show()
         plt.close()
+class OldWaning(Survival):
+    """
+    calculate fraction of old clones remaining across each month past
+    the burnin period
+    """
+    def __init__(self, *args, **kwargs):
+        Survival.__init__(self, *args, **kwargs)
+    def MonthlyKept(self, x):
+        """
+        return number of old infections past burnin
+        """
+        monthly_old = x[(x.active_baseline_infection) & (x.date >= x.burnin)]
+        return monthly_old[['cohortid', 'h_popUID']].drop_duplicates().shape[0]
+    def CalculateWaning(self, frame):
+        """
+        Calculate percentage of old clones kept by year month
+        """
+        monthly_counts = frame.\
+            groupby('year_month').\
+            apply(lambda x : self.MonthlyKept(x))
+
+        monthly_pc = (monthly_counts / monthly_counts.values.max()).\
+            reset_index().\
+            rename(columns = {0 : 'pc'})
+
+        return monthly_pc
+    def RunBootstraps(self):
+        """
+        Calculate fraction by period on bootstrapped infections
+        """
+
+        bootstraps = list()
+
+        for i in tqdm(range(self.n_iter), desc='bootstrapping...'):
+            self.BootstrapInfections()
+            bootstraps.append(
+                self.CalculateWaning(self.infections)
+                )
+
+        # merge bootstraps
+        self.bootstrap_results = pd.concat(bootstraps)
+
+        # calculate confidence intervals
+        self.bootstrap_results = self.bootstrap_results.\
+            groupby(['year_month']).\
+            apply(
+                lambda x : np.percentile(x.pc, [2.5, 97.5])
+                )
+    def fit(self):
+        self.original_results = self.CalculateWaning(self.original_infections)
+        if self.bootstrap:
+            self.RunBootstraps()
+    def plot(self):
+        g = sns.lineplot(
+            data = self.original_results,
+            x = 'year_month', y ='pc',
+            legend=False, lw=5
+            )
+
+        if self.bootstrap:
+            plt.fill_between(
+                self.bootstrap_results.index,
+                y1=[i for i,j in self.bootstrap_results.values],
+                y2=[j for i,j in self.bootstrap_results.values],
+                alpha=0.3
+                )
+
+        plt.xlabel('Date')
+        plt.title('Percentage')
+        plt.title('Fraction of Old Clones Remaining')
+        plt.show()
+        plt.close()
+
 
 def dev_infectionLabeler():
     sdo = pd.read_csv('../prism2/full_prism2/final_filter.tab', sep="\t")
@@ -1049,11 +1083,18 @@ def dev_Survival():
         burnin=2, haplodrops=False)
     labels = il.LabelInfections()
 
-    # s = Survival(labels, meta, burnin=2)
-    # FractionOldNew(infections=labels, meta=meta, burnin=2).fit()
-    ons = OldNewSurival(infections=labels, meta=meta, burnin=2, bootstrap=False, n_iter=5)
-    ons.fit()
-    ons.plot()
+    # fon = FractionOldNew(infections=labels, meta=meta, burnin=2, bootstrap=False, n_iter=5)
+    # fon.fit()
+    # fon.plot()
+    #
+    # ons = OldNewSurival(infections=labels, meta=meta, burnin=2, bootstrap=False, n_iter=5)
+    # ons.fit()
+    # ons.plot()
+
+    w = OldWaning(infections = labels, meta=meta, burnin=2, bootstrap=True, n_iter=5)
+    w.fit()
+    w.plot()
+
 
 def worker_foi(sdo, meta, group):
     labels = InfectionLabeler(sdo, meta, by_infection_event=True, impute_missing=True).LabelInfections()
