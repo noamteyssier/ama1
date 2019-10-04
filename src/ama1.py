@@ -3,7 +3,9 @@
 import numpy as np
 import pandas as pd
 from tqdm import *
-import sys, math
+import sys, math, warnings
+from scipy.optimize import minimize
+from scipy.special import expit
 
 from multiprocessing import *
 import seaborn as sns
@@ -679,23 +681,291 @@ class BootstrapCID:
         for _ in tqdm(np.arange(num_iter)):
             yield self.getSample()
 
+class Survival:
+    np.seterr(divide = 'ignore')
+    def __init__(self, infections, meta, burnin=3, allowedSkips=3):
+        self.infections = infections
+        self.meta = meta
+        self.burnin = burnin
+        self.allowedSkips = allowedSkips
+        self.minimum_duration = pd.Timedelta('15 days')
+
+
+        self.date_bins = pd.DataFrame()
+        self.ym_counts = pd.Series()
+        self.cid_dates = pd.DataFrame()
+        self.treatments = pd.DataFrame()
+
+
+        self.ValidateInfections()
+        self.ValidateMeta()
+        self.ymCounts()
+        self.MakeCohortidDates()
+        self.MarkTreatments()
+        self.original_infections = self.infections.copy()
+    def ValidateInfections(self):
+        """validate labeled infections for information required"""
+
+        # convert infection date to date if not already
+        self.infections.date = pd.to_datetime(self.infections.date)
+
+        # convert burnin to date if not already
+        self.infections.burnin = pd.to_datetime(self.infections.burnin)
+
+        self.infections['year_month'] = pd.DatetimeIndex(self.infections.date).to_period('M')
+    def ValidateMeta(self):
+        """validate meta dataframe for information required"""
+
+        self.meta.date = pd.to_datetime(self.meta.date)
+        self.meta.enrolldate = pd.to_datetime(self.meta.enrolldate)
+        self.meta['year_month'] = pd.DatetimeIndex(self.meta.date).to_period('M')
+        self.meta['burnin'] = self.meta.enrolldate + pd.DateOffset(months = self.burnin)
+    def ymCounts(self):
+        """count number of people a year_month past burnin"""
+        #self.meta[self.meta.date >= self.meta.burnin].\
+        self.ym_counts = self.meta.\
+            groupby('year_month').apply(lambda x : x['cohortid'].unique().size)
+    def MakeCohortidDates(self):
+        """create a series indexed by cid for all dates of that cid"""
+        self.cid_dates = self.infections[['cohortid', 'date']].\
+            drop_duplicates().\
+            groupby('cohortid').\
+            apply(lambda x : x.date.values)
+    def MarkTreatments(self):
+        """mark all malaria dates where treatment was given"""
+        def treatments(x):
+            return x[x.malariacat == 'Malaria'].date.unique()
+        self.treatments = self.meta.groupby(['cohortid']).apply(lambda x : treatments(x))
+    def MarkAges(self):
+        """create a series indexed by cid for final age of that cid"""
+
+        self.cid_ages = self.meta[['cohortid', 'date', 'ageyrs']].\
+            drop_duplicates().\
+            groupby(['cohortid']).\
+            apply(lambda x : x.tail(1).ageyrs)
+    def RemoveTreated(self):
+        """
+        Remove individuals who received treatment at any point in the study
+        """
+        self.treated_individuals = self.treatments[
+            self.treatments.apply(lambda x : len(x) > 0)
+            ].index
+        self.original_infections = self.original_infections[
+            ~self.original_infections.cohortid.isin(self.treated_individuals)
+            ]
+    def BootstrapInfections(self, frame=None):
+        """randomly sample with replacement on CID"""
+        if type(frame) == type(None):
+            frame = self.original_infections.copy()
+
+        c = frame.cohortid.unique().copy()
+        rc = np.random.choice(c, c.size)
+        self.infections = frame.copy()
+
+        # calculate index size for each cohortid in random choice
+        cid_size = np.array([np.where(self.infections.cohortid == i)[0].size for i in rc])
+
+        # set index to cohortid
+        self.infections = self.infections.set_index('cohortid')
+
+        # generate bootstrap
+        self.infections = self.infections.loc[rc]
+
+        # create array of new cid_id with expected length
+        new_cid = np.concatenate([np.full(cid_size[i], i) for i in range(cid_size.size)]).ravel()
+
+        # have hashable id num to cid
+        self.bootstrap_id_dates = pd.Series(rc)
+
+        self.infections = self.infections.reset_index()
+        self.infections['cohortid'] = new_cid
+    def OldNewSurvival(self, bootstrap=False, n_iter=200):
+        """plot proportion of haplotypes are old v new in population"""
+        def cid_hid_cat_count(x):
+            return x[['cohortid','h_popUID']].drop_duplicates().shape[0]
+        def calculate_percentages(df):
+            chc_counts = df.\
+                groupby(['year_month', 'active_new_infection']).\
+                apply(lambda x : cid_hid_cat_count(x)).\
+                reset_index().\
+                rename(columns = {0 : 'counts'})
+            chc_counts['pc'] = chc_counts[['year_month','counts']].\
+                groupby('year_month').\
+                apply(lambda x : x / x.sum())
+
+            chc_counts['active_new_infection'] = chc_counts.active_new_infection.apply(lambda x : 'new' if x else 'old')
+            return chc_counts
+        def plot_ons(odf, boots=pd.DataFrame()):
+            odf['year_month'] = [i.to_timestamp() for i in odf.year_month.values]
+            odf['year_month'] = pd.to_datetime(odf['year_month'])
+
+            if not boots.empty:
+                for v in odf.active_new_infection.unique():
+                    sns.lineplot(data=odf[odf.active_new_infection == v],  x='year_month', y='pc', label=v, lw=4)
+                    plt.fill_between(
+                        boots[v].index.to_timestamp(),
+                        [i for i,j in boots[v].values],
+                        [j for i,j in boots[v].values],
+                        alpha = 0.5)
+            else:
+                sns.lineplot(data=odf, x='year_month', y = 'pc', hue='active_new_infection')
+            plt.xlabel('Date')
+            plt.ylabel('Percentage')
+            plt.title('Fraction of Old Clones In Infected Population')
+            plt.savefig("../plots/survival/hid_survival.pdf")
+            plt.show()
+            plt.close()
+        odf = calculate_percentages(self.original_infections)
+        if bootstrap:
+            boots = []
+            for i in tqdm(range(n_iter), desc = 'bootstrapping'):
+                self.BootstrapInfections()
+                df = calculate_percentages(self.infections)
+                boots.append(df)
+
+            boots = pd.concat(boots)
+            boots = boots.groupby(['active_new_infection', 'year_month']).apply(lambda x : np.percentile(x.pc, [2.5, 97.5]))
+            plot_ons(odf, boots)
+        else:
+            plot_ons(odf)
+    def CID_oldnewsurvival(self, bootstrap=False, n_iter=200):
+        """plot proportion of people with old v new v mixed"""
+        def cid_cat_count(x, mix=True):
+            return (x['active_new_infection'] + 1).unique().sum()
+        def date_cat_count(x):
+            return x.cohortid.drop_duplicates().shape[0]
+        def calculate_percentages(df):
+            mix_counts = df.\
+                groupby(['cohortid', 'year_month']).\
+                apply(lambda x : cid_cat_count(x)).\
+                reset_index().\
+                rename(columns = {0 : 'cid_active_new_infection'})
+
+            date_counts = mix_counts.groupby(['year_month', 'cid_active_new_infection']).\
+                apply(lambda x : date_cat_count(x)).\
+                reset_index().\
+                rename(columns = {0 : 'counts'})
+
+            piv = date_counts.\
+                pivot(index='year_month', columns='cid_active_new_infection', values='counts').\
+                rename(columns = {1 : 'old', 2 : 'new', 3 : 'mix'}).\
+                fillna(0)
+
+            if piv.shape[1] == 3:
+                piv['mix_old'] = piv.old + piv.mix
+                piv['mix_new'] = piv.new + piv.mix
+                piv = piv.drop(columns = 'mix')
+            else:
+                piv['mix_old'] = piv.old
+                piv['mix_new'] = piv.new
+
+            # convert old/new/mix values into fractions of datebin active population
+            piv = piv.apply(
+                lambda x : x.values / self.ym_counts[x.index],
+                axis=0
+                ).reset_index()
+
+            df = pd.melt(piv, id_vars = 'year_month')
+            df['mixed'] = df.cid_active_new_infection.apply(lambda x : 'mix' in x)
+
+            return df
+        def plot_cons(odf, boots = pd.DataFrame()):
+            odf['year_month'] = [i.to_timestamp() for i in odf.year_month.values]
+            odf['year_month'] = pd.to_datetime(odf['year_month'])
+            if not boots.empty:
+                lines = []
+                colors = []
+                for v in odf.cid_active_new_infection.unique():
+                    ls = ':' if 'mix' in v else '-'
+                    cl = 'teal' if 'old' in v else 'coral'
+                    ax = sns.lineplot(
+                        data=odf[odf.cid_active_new_infection == v],
+                        x='year_month',
+                        y='value',
+                        label=v,
+                        # color=cl,
+                        lw=4)
+                    plt.fill_between(
+                        boots[v].index.to_timestamp(),
+                        [i for i,j in boots[v].values],
+                        [j for i,j in boots[v].values],
+                        alpha = 0.3)
+                    lines.append(ls)
+                    colors.append(cl)
+                [ax.lines[i].set_linestyle(lines[i]) for i in range(len(lines))]
+                [ax.lines[i].set_color(colors[i]) for i in range(len(lines))]
+            else:
+                sns.lineplot(data=odf, x='year_month', y ='value', hue='cid_active_new_infection', style='mixed')
+
+
+            plt.xlabel('Date')
+            plt.ylabel('Percentage')
+            plt.title('Fraction of New and Old Clones by Individual')
+            plt.savefig("../plots/survival/CID_survival.pdf")
+            plt.show()
+            plt.close()
+
+        odf = calculate_percentages(self.original_infections)
+        if bootstrap :
+            boots = []
+            for i in tqdm(range(n_iter), desc = 'bootstrapping'):
+                self.BootstrapInfections()
+                df = calculate_percentages(self.infections)
+                boots.append(df)
+            boots = pd.concat(boots)
+            boots = boots.groupby(['cid_active_new_infection', 'year_month']).apply(lambda x : np.percentile(x.value, [2.5, 97.5]))
+            plot_cons(odf, boots)
+        else:
+            plot_cons(odf)
+    def OldWaning(self, bootstrap=False, n_iter=200):
+        """calculate fraction of old clones remaining across each month past the burnin (use october meta)"""
+        def monthly_kept(x):
+            """return number of old infections past burnin"""
+            monthly_old = x[(~x.active_new_infection) & (x.date >= x.burnin)]
+            return monthly_old[['cohortid', 'h_popUID']].drop_duplicates().shape[0]
+        def waning(df):
+            monthly_counts = df.groupby('year_month').apply(lambda x : monthly_kept(x))
+            return monthly_counts / monthly_counts.values.max()
+        def plot_wane(omc, boots=pd.DataFrame()):
+            # omc['year_month'] = [i.to_timestamp() for i in omc.year_month.values]
+            # omc['year_month'] = pd.to_datetime(omc['year_month'])
+            g = sns.lineplot(x = omc.index.to_timestamp(), y = omc.values, legend=False, lw=5)
+            if not boots.empty:
+                plt.fill_between(
+                    boots.index.to_timestamp(),
+                    y1=[i for i,j in boots.values],
+                    y2=[j for i,j in boots.values],
+                    alpha=0.3
+                    )
+            plt.xlabel('Date')
+            plt.title('Percentage')
+            plt.title('Fraction of Old Clones Remaining')
+            g.get_figure().savefig("../plots/survival/oldClones.pdf")
+            plt.show()
+            plt.close()
+
+        omc = waning(self.original_infections)
+        if bootstrap:
+            boots = []
+            for i in tqdm(range(n_iter), desc='bootstrapping'):
+                self.BootstrapInfections()
+                mc = waning(self.infections)
+                boots.append(mc)
+            boots = pd.concat(boots)
+            boots = boots.groupby(level = 0).apply(lambda x : np.percentile(x, [2.5, 97.5]))
+            plot_wane(omc, boots)
+        else:
+            plot_wane(omc)
+
 
 def dev_infectionLabeler():
     sdo = pd.read_csv('../prism2/full_prism2/final_filter.tab', sep="\t")
     meta = pd.read_csv('../prism2/stata/full_meta_grant_version.tab', sep="\t", low_memory=False)
 
     il = InfectionLabeler(sdo, meta,
-        by_infection_event=True, qpcr_threshold=0.1,
+        by_infection_event=False, qpcr_threshold=0.1,
         burnin=2, haplodrops=False)
     labels = il.LabelInfections()
-    print(labels.infection_event.sum())
-
-    # ilc = InfectionLabeler(sdo, meta, burnin=2)
-    # labels_clone = ilc.LabelInfections()
-    # print(labels_clone)
-    #
-    # labels[labels.date <= pd.to_datetime('2019-04-01')].infection_event.sum()
-    # labels_clone.infection_event.sum()
 
 def dev_FOI():
     sdo = pd.read_csv('../prism2/full_prism2/final_filter.tab', sep="\t")
@@ -732,12 +1002,25 @@ def dev_BootstrapCID():
     sns.distplot(bs_foi.FOI)
     plt.axvline(true_fit.FOI[0])
 
+def dev_Survival():
+    sdo = pd.read_csv('../prism2/full_prism2/final_filter.tab', sep="\t")
+    meta = pd.read_csv('../prism2/stata/full_meta_grant_version.tab', sep="\t", low_memory=False)
+
+    il = InfectionLabeler(sdo, meta,
+        by_infection_event=False, qpcr_threshold=0.1,
+        burnin=2, haplodrops=False)
+    labels = il.LabelInfections()
+
+    s = Survival(labels, meta, burnin=2)
+    # s.OldNewSurvival(bootstrap=True, n_iter=100)
+    # s.CID_oldnewsurvival(bootstrap=True, n_iter=100)
+    # s.OldWaning(bootstrap=True)
+
 def worker_foi(sdo, meta, group):
     labels = InfectionLabeler(sdo, meta, by_infection_event=True, impute_missing=True).LabelInfections()
     foi = FOI(labels, meta)
     full = foi.fit(group=group)
     return full
-
 def multiprocess_FOI():
     sdo = pd.read_csv('../prism2/full_prism2/final_filter.tab', sep="\t")
     meta = pd.read_csv('../prism2/stata/full_meta_grant_version.tab', sep="\t", low_memory=False)
@@ -761,8 +1044,10 @@ def multiprocess_FOI():
     [plt.axvline(val) for val in true_foi.FOI.values]
     plt.legend()
 
+
 if __name__ == '__main__':
-    dev_infectionLabeler()
+    # dev_infectionLabeler()
+    dev_Survival()
     # dev_FOI()
     # dev_BootstrapLabels()
     # multiprocess_FOI()
