@@ -10,8 +10,8 @@ from scipy.special import expit
 from multiprocessing import *
 import seaborn as sns
 import matplotlib.pyplot as plt
-# from pandas.plotting import register_matplotlib_converters
 
+pd.plotting.register_matplotlib_converters()
 sns.set(rc={'figure.figsize':(20, 20), 'lines.linewidth': 2})
 
 class InfectionLabeler:
@@ -465,7 +465,6 @@ class InfectionLabeler:
             plt.show()
 
         plt.close()
-
 class FOI:
     def __init__(self, labels, meta, burnin=3):
         self.labels = labels
@@ -629,7 +628,6 @@ class FOI:
             )
 
         return foi.reset_index()
-
 class BootstrapCID:
     """
     Perform bootstrapping on a dataframe by cohortid
@@ -684,7 +682,6 @@ class BootstrapCID:
             yield self.getSample()
 
 class Survival(object):
-    pd.plotting.register_matplotlib_converters()
     def __init__(self, infections, meta, burnin=3, allowedSkips=3, bootstrap=False, n_iter=200):
         self.infections = infections
         self.meta = meta
@@ -775,7 +772,6 @@ class Survival(object):
 
         self.infections = self.infections.reset_index()
         self.infections['cohortid'] = new_cid
-
 class FractionOldNew(Survival):
     """
     Survival object that calculates the fraction of old vs new clones
@@ -1029,6 +1025,150 @@ class OldWaning(Survival):
         plt.show()
         plt.close()
 
+class ExponentialDecay():
+    def __init__(self, infections, left_censor='2018-01-01', right_censor='2019-02-01', minimum_duration=15, seed=None):
+        if seed:
+            np.random.seed(seed)
+
+        # left_censor = pd.to_datetime('2018-01-01')
+        # right_censor = pd.to_datetime('2019-02-01')
+
+        self.infections = infections
+        self.study_start = pd.to_datetime(left_censor) if left_censor else infections.date.min()
+        self.study_end = pd.to_datetime(right_censor) if right_censor else infections.date.max()
+        self.minimum_duration = pd.Timedelta('{} Days'.format(minimum_duration))
+
+        self.durations = []
+        self.num_classes = np.zeros(5)
+        self.optimizers = []
+    def BootstrapInfections(self, frame):
+        """Bootstrap on Cohortid"""
+        cids = frame.cohortid.unique()
+        cid_choice = np.random.choice(cids, cids.size)
+        bootstrap = pd.concat([frame[frame.cohortid == c] for c in cid_choice])
+        return bootstrap
+    def ClassifyInfection(self, infection):
+        """
+        Classify an infection type by whether or not the start date of the
+        infection is observed in a given period and return the duration by the
+        class
+        """
+        infection_min, infection_max = infection.date.min(), infection.date.max()
+
+        # infection not active in period
+        if (infection_max <= self.study_start) | (infection_min >= self.study_end):
+            classification = 0
+            duration = None
+
+        # Start and End Observed in Period
+        elif (infection_min >= self.study_start) & (infection_max <= self.study_end):
+            classification = 1
+            duration = infection_max - infection_min
+
+        # Unobserved Start + Observed End in Period
+        elif (infection_min <= self.study_start) & (infection_max <= self.study_end):
+            classification = 2
+            duration = infection_max - self.study_start
+
+        # Observed Start + Unobserved End in Period
+        elif (infection_min >= self.study_start) & (infection_max >= self.study_end):
+            classification = 3
+            duration = self.study_end - infection_min
+
+        # Unobserved Start + Unobserved End in Period
+        elif (infection_min <= self.study_start) & (infection_max >= self.study_end):
+            classification = 4
+            duration = self.study_end - self.study_start
+
+
+        if duration == pd.to_timedelta(0):
+            duration += self.minimum_duration
+
+        if duration:
+            duration = duration.days
+
+        self.num_classes[classification] += 1
+
+        return np.array([classification, duration])
+    def GetInfectionDurations(self, infection_frame):
+        """for each clonal infection calculate duration"""
+        durations = infection_frame.\
+            groupby(['cohortid', 'h_popUID']).\
+            apply(lambda x : self.ClassifyInfection(x)).\
+            values
+        durations = np.vstack(durations)
+        durations = durations[durations[:,0] != 0]
+        l1_durations = durations[durations[:,0] <= 2][:,1]
+        l2_durations = durations[durations[:,0] > 2][:,1]
+
+        self.durations.append([l1_durations, l2_durations])
+        return l1_durations, l2_durations
+    def RunDecayFunction(self, lam, l1_durations, l2_durations):
+        """
+        Exponential Decay Function as Log Likelihood
+        """
+
+        l1_llk = (np.log(lam) - (lam * l1_durations)).sum()
+
+        l2_llk = ((-1 * lam) * l2_durations).sum()
+
+        llk = l1_llk + l2_llk
+
+        return -1 * llk
+    def GetConfidenceIntervals(self, min = 5, max = 95):
+        """
+        Return confidence intervals for a bootstrapped array
+        """
+        ci_min, ci_max = np.percentile(self.bootstrapped_lams, [min, max])
+        return ci_min, ci_max
+    def fit(self, frame=None, bootstrap=False, n_iter=200):
+        """
+        Fit Exponential Model
+        """
+        if type(frame) == type(None):
+            frame = self.infections.copy()
+        if bootstrap:
+            bootstrapped_lams = [self.fit(frame=self.BootstrapInfections(frame)) for _ in tqdm(range(n_iter))]
+
+
+        # generate durations and initial guess
+        l1_durations, l2_durations = self.GetInfectionDurations(frame)
+        lam = np.random.random()
+
+        # run minimization of negative log likelihood
+        opt = minimize(
+            self.RunDecayFunction,
+            lam,
+            args=(l1_durations, l2_durations),
+            method = 'L-BFGS-B',
+            bounds = ((1e-6, None),)
+            )
+        self.optimizers.append(opt)
+        self.estimated_lam = opt.x[0]
+
+        if bootstrap:
+            self.bootstrapped_lams = np.array(bootstrapped_lams)
+            return (self.estimated_lam, self.bootstrapped_lams)
+        else:
+            return self.estimated_lam
+    def plot(self):
+        """
+        Generate a plot of the distribution of bootstrapped lambdas
+        """
+        ci_min, ci_max = self.GetConfidenceIntervals()
+
+        sns.distplot(1 / self.bootstrapped_lams, color='teal', bins=30)
+        plt.axvline(1 / self.estimated_lam, color='teal', linestyle=':', lw=8)
+        plt.xlabel("Calculated Days (1 / lambda)")
+        plt.title(
+            "Estimated Lambda : {:.4f}e-3 ({:.4f}e-3 -- {:.4f}e-3)\nEstimated Days : {:.1f} ({:.1f} -- {:.1f})".format(
+                self.estimated_lam * 1e3, ci_min * 1e3, ci_max * 1e3,
+                1/self.estimated_lam, 1/ci_max, 1/ci_min
+                )
+            )
+        plt.show()
+        plt.close()
+
 
 def dev_infectionLabeler():
     sdo = pd.read_csv('../prism2/full_prism2/final_filter.tab', sep="\t")
@@ -1038,7 +1178,6 @@ def dev_infectionLabeler():
         by_infection_event=False, qpcr_threshold=0.1,
         burnin=2, haplodrops=False)
     labels = il.LabelInfections()
-
 def dev_FOI():
     sdo = pd.read_csv('../prism2/full_prism2/final_filter.tab', sep="\t")
     meta = pd.read_csv('../prism2/stata/full_meta_grant_version.tab', sep="\t", low_memory=False)
@@ -1051,7 +1190,6 @@ def dev_FOI():
     full = foi.fit(group = ['year_month'])
     labels.infection_event
     labels[labels.date <= pd.to_datetime('2019-04-01')].infection_event.sum()
-
 def dev_BootstrapCID():
     sdo = pd.read_csv('../prism2/full_prism2/final_filter.tab', sep="\t")
     meta = pd.read_csv('../prism2/stata/full_meta_grant_version.tab', sep="\t", low_memory=False)
@@ -1073,13 +1211,12 @@ def dev_BootstrapCID():
 
     sns.distplot(bs_foi.FOI)
     plt.axvline(true_fit.FOI[0])
-
 def dev_Survival():
     sdo = pd.read_csv('../prism2/full_prism2/final_filter.tab', sep="\t")
     meta = pd.read_csv('../prism2/stata/full_meta_grant_version.tab', sep="\t", low_memory=False)
 
     il = InfectionLabeler(sdo, meta,
-        by_infection_event=False, qpcr_threshold=0.1,
+        by_infection_event=True, qpcr_threshold=0.1,
         burnin=2, haplodrops=False)
     labels = il.LabelInfections()
 
@@ -1090,11 +1227,14 @@ def dev_Survival():
     # ons = OldNewSurival(infections=labels, meta=meta, burnin=2, bootstrap=False, n_iter=5)
     # ons.fit()
     # ons.plot()
+    #
+    # w = OldWaning(infections = labels, meta=meta, burnin=2, bootstrap=True, n_iter=5)
+    # w.fit()
+    # w.plot()
 
-    w = OldWaning(infections = labels, meta=meta, burnin=2, bootstrap=True, n_iter=5)
-    w.fit()
-    w.plot()
-
+    ed = ExponentialDecay(labels)
+    ed.fit(bootstrap=True)
+    ed.plot()
 
 def worker_foi(sdo, meta, group):
     labels = InfectionLabeler(sdo, meta, by_infection_event=True, impute_missing=True).LabelInfections()
