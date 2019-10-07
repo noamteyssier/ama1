@@ -108,7 +108,7 @@ def foi(sdo, meta, args):
     )
 
     labels = il.LabelInfections()
-    f = FOI(labels, meta)
+    f = FOI(labels, meta, burnin = args.burnin)
     result = f.fit(group = group)
     result.to_csv(sys.stdout, sep="\t", index=True)
 def main():
