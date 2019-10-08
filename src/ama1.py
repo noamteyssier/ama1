@@ -14,18 +14,296 @@ import matplotlib.pyplot as plt
 pd.plotting.register_matplotlib_converters()
 sns.set(rc={'figure.figsize':(20, 20), 'lines.linewidth': 2})
 
+class Individual(object):
+    """
+    Class to handle methods related to an individual in the cohort
+    """
+    def __init__(self, cid_frame, skip_threshold=3, impute_missing=True):
+        self.frame = cid_frame
+        self.skip_threshold = skip_threshold
+        self.impute_missing = impute_missing
+
+        self.cid = cid_frame.cohortid.unique()[0]
+        self.burnin = cid_frame.burnin.unique()[0]
+        self.dates = cid_frame.date.unique()
+        self.hids = cid_frame.h_popUID.unique()
+
+
+        self.timeline = pd.DataFrame()
+        self.skip_frame = pd.DataFrame()
+        self.labels = pd.DataFrame()
+
+        self.QpcrTimeline()
+        self.PostBurnin()
+
+    def BuildTimeline(self, cid_frame, index = 'h_popUID', column = 'date', value='pass_qpcr'):
+        """
+        Awesome numpy pivot function found @
+        https://stackoverflow.com/questions/48527091/efficiently-and-simply-convert-from-long-format-to-wide-format-in-pandas-and-or
+        """
+        arr = cid_frame.values
+        idx_index, idx_column, idx_value = [np.where(cid_frame.columns == v)[0] for v in [index, column, value]]
+
+
+        rows, row_pos = np.unique(arr[:, idx_index], return_inverse=True)
+        cols, col_pos = np.unique(arr[:, idx_column], return_inverse=True)
+        pivot_arr = np.zeros((rows.size, cols.size))
+        pivot_arr[row_pos, col_pos] = arr[:, idx_value[0]]
+
+        frame = pd.DataFrame(
+            pivot_arr,
+            columns = cols,
+            index = rows,
+            dtype=bool
+            )
+        frame.index.name = index
+        return frame
+    def QpcrTimeline(self):
+        """
+        Build timeline based on whether values pass qpcr_threshold
+        """
+        self.timeline = self.BuildTimeline(self.frame, value = 'pass_qpcr')
+        self.timeline.loc['nan'] = self.timeline.max(axis = 0)
+    def PostBurnin(self):
+        """
+        Find first date past the burnin,
+        if burnin is between two visits mark postburnin as midway
+        """
+        try:
+            self.post_burnin = np.where(self.dates >= self.burnin)[0].min()
+
+        except ValueError:
+            return False
+
+
+        if self.dates[self.post_burnin] > self.burnin:
+            self.post_burnin -= 0.5
+
+        return self.post_burnin
+    def PositionalDifference(self, x, position=0):
+        """
+        For a bool array x : calculate number of skips between each truth
+        calculate first truth with respect to the number of visits post burnin
+        """
+        truth = np.where(x)[0]
+
+        # no qpcr positive events
+        if truth.size == 0:
+            return np.array([])
+
+        skip_arr = []
+        for i, pos in enumerate(truth):
+
+            # first occurence of a haplotype
+            if i == 0:
+
+                # make all skips zero pre burnin
+                if pos < position:
+                    skips = 0
+
+                # first visit after burnin is equal to visit number
+                else:
+                    skips = pos
+
+
+            # every other occurence
+            else:
+                # disregard pre-burnin skips
+                if (truth[i - 1] < position) & (pos >= position):
+                    skips = pos - math.ceil(position)
+
+                # calculate skips in pre-burnin period
+                else:
+                    skips = pos - truth[i-1] - 1
+
+            skip_arr.append(skips)
+
+        return np.array(skip_arr)
+    def ImputeMissing(self):
+        """
+        Impute missing values of haplotypes based on qpcr values of the samples
+        """
+        nan_skips = self.PositionalDifference(self.timeline.loc['nan'])
+        breaks = np.where(nan_skips > self.skip_threshold)[0]
+        if breaks.size > 0:
+            print('need to make this')
+            sys.exit()
+
+
+        for hid in self.hids[self.hids != 'nan']:
+            min = np.where(self.timeline.loc[hid])[0].min()
+            max = np.where(self.timeline.loc[hid])[0].max()
+            self.timeline.loc[hid][min:max] = self.timeline.loc['nan'][min:max]
+    def SkipsByClone(self):
+        """
+        Calculate skips individually by clone
+        """
+
+        self.skip_frame = []
+        for hid in self.hids[self.hids != 'nan']:
+
+            # calculate skips
+            skips = self.PositionalDifference(
+                self.timeline.loc[hid], self.post_burnin
+                )
+
+            # find dates where h_popUID is present
+            hid_dates = self.dates[self.timeline.loc[hid]]
+
+            # report visit number of hid_dates
+            visit_numbers = np.where(self.timeline.loc[hid])[0]
+
+
+            # append to growing skip dataframe
+            for idx in np.arange(skips.size):
+                self.skip_frame.append({
+                    'cohortid' : self.cid,
+                    'h_popUID' : hid,
+                    'date' : hid_dates[idx],
+                    'visit_number' : visit_numbers[idx],
+                    'skips' : skips[idx]
+                })
+
+        if len(self.skip_frame) > 0 :
+            self.skip_frame = pd.DataFrame(self.skip_frame)
+            self.skip_frame = self.skip_frame[self.skip_frame.h_popUID != 'nan']
+        else:
+            self.skip_frame = pd.DataFrame()
+    def SkipsByInfectionEvent(self):
+
+        print(self.timeline)
+        self.plot_haplodrop()
+        sys.exit()
+        if self.impute_missing:
+            self.ImputeMissing()
+
+        aggregates = [set()]
+        aggregate_endpoints = []
+        for idx in np.arange(self.timeline.shape[1]):
+            h_found = np.where(self.timeline.iloc[:,idx])[0]
+
+            for agg in aggregates:
+
+                # first time finding an infection event
+                if len(agg) == 0:
+                    [agg.add(h) for h in h_found]
+                    continue
+
+                # finding any new infections
+                if np.any([h not in agg for h in h_found]):
+                    print(h_found)
+                    print(agg)
+
+        pass
+    def ActiveInfection(self, group):
+        """
+        Label all timepoints where an infection is still active
+        """
+
+        infections = np.where(group.infection_event)[0]
+
+        active_array = np.zeros(group.infection_event.size)
+
+        # for each infection event, label all following infections as active
+        for i in np.arange(infections.size):
+            if i < infections.size - 1:
+                active_array[infections[i] : infections[i+1]] = 1
+            else:
+                active_array[infections[i] : ] = 1
+
+
+        return active_array
+    def LabelActiveInfections(self):
+        """
+        Label active baseline and new infections
+        """
+        self.labels['active_new_infection'] = np.concatenate(
+            self.labels.groupby(['cohortid', 'h_popUID']).apply(
+                lambda x : self.ActiveInfection(x).astype(bool)
+                ).values
+            )
+        self.labels['active_baseline_infection'] = (~self.labels.active_new_infection)
+    def getLabel(self, row):
+        """label infections as true or false"""
+
+        # visits before burnin are false
+        if row.date <= row.burnin:
+            return False
+
+        # first infection occurs at a timepoint past the allowed skips
+        elif row.skips > self.skip_threshold :
+            return True
+
+        # if infection is never seen before and after burnin then true
+        elif row.skips == row.visit_number:
+            return True
+
+        else:
+            return False
+    def LabelInfections(self, by_clone=True):
+        to_keep = ['cohortid', 'h_popUID', 'date', 'skips', 'visit_number', 'enrolldate', 'burnin', 'gender', 'agecat']
+
+        if by_clone:
+            self.SkipsByClone()
+
+            if not self.skip_frame.empty:
+                self.labels = self.skip_frame.merge(
+                    self.frame, how='inner'
+                    )[to_keep]
+
+            if not self.labels.empty:
+                self.labels['infection_event'] = self.labels.apply(
+                    lambda x : self.getLabel(x),
+                    axis = 1
+                    )
+                self.LabelActiveInfections()
+
+            return self.labels
+
+        else:
+            self.SkipsByInfectionEvent()
+            sys.exit()
+    def plot_haplodrop(self, infection_event=True, save=False, prefix=None):
+        """
+        Plot an individuals timeline
+        """
+        if infection_event:
+            timeline = self.timeline.copy()
+        else:
+            timeline = self.infection_event_timeline.copy()
+
+        if timeline.shape[0] == 0:
+            return
+
+        sns.heatmap(
+            timeline, square=True, linewidths=1,
+            cbar=False, xticklabels=False, yticklabels=False,
+            annot=True
+            )
+        if save:
+            name = '../plots/cid_haplodrop/{}.png'.format(save)
+            if prefix:
+                name = '../plots/cid_haplodrop/{}.{}.png'.format(prefix, save)
+
+            print('saving haplodrop : {}'.format(name))
+            plt.savefig(name)
+        else:
+            plt.show()
+
+        plt.close()
+
 class InfectionLabeler:
     """
     Label Infection events given a qpcr threshold, burnin period, and allowed skips
     """
     pd.options.mode.chained_assignment = None
-    def __init__(self, sdo, meta, qpcr_threshold = 0, burnin=3, allowedSkips = 3, by_infection_event=False, impute_missing=True, agg_infection_event=True, haplodrops=False):
+    def __init__(self, sdo, meta, qpcr_threshold = 0, burnin=3, skip_threshold = 3, by_infection_event=False, impute_missing=True, agg_infection_event=True, haplodrops=False):
 
         self.sdo = sdo
         self.meta = meta
         self.qpcr_threshold = qpcr_threshold
         self.burnin = burnin
-        self.allowedSkips = allowedSkips
+        self.skip_threshold = skip_threshold
         self.by_infection_event = by_infection_event
         self.impute_missing = impute_missing
         self.agg_infection_event = agg_infection_event
@@ -34,6 +312,10 @@ class InfectionLabeler:
 
         # post processed sdo + meta
         self.frame = pd.DataFrame()
+
+
+        self.cohort = list()
+
 
         # annotated skips dataframe
         self.skips = pd.DataFrame()
@@ -127,344 +409,367 @@ class InfectionLabeler:
         self.AddBurnin()
         self.MarkQPCR()
         self.MergeFrames()
-    def PostBurnin(self, dates, burnin):
-        """
-        Find first date past the burnin,
-        if burnin is between two visits mark postburnin as midway
-        """
-        try:
-            post_burnin = np.where(dates >= burnin)[0].min()
-
-        except ValueError:
-            return False
-
-
-        if dates[post_burnin] > burnin:
-            post_burnin -= 0.5
-
-        return post_burnin
-    def PositionalDifference(self, x, post_burnin):
-        """
-        For a bool array x : calculate number of skips between each truth
-        calculate first truth with respect to the number of visits post burnin
-        """
-        truth = np.where(x)[0]
-
-        # no qpcr positive events
-        if truth.size == 0:
-            return np.array([])
-
-        skip_arr = []
-        for i, pos in enumerate(truth):
-
-            # first occurence of a haplotype
-            if i == 0:
-
-                # make all skips zero pre burnin
-                if pos < post_burnin:
-                    skips = 0
-
-                # first visit after burnin is equal to visit number
-                else:
-                    skips = pos
-
-
-            # every other occurence
-            else:
-                # disregard pre-burnin skips
-                if (truth[i - 1] < post_burnin) & (pos >= post_burnin):
-                    skips = pos - math.ceil(post_burnin)
-
-                # calculate skips in pre-burnin period
-                else:
-                    skips = pos - truth[i-1] - 1
-
-            skip_arr.append(skips)
-
-        return np.array(skip_arr)
-    def BuildTimeline(self, cid_frame, index='h_popUID', column = 'date', value='pass_qpcr'):
-        """
-        Awesome numpy pivot function found @
-        https://stackoverflow.com/questions/48527091/efficiently-and-simply-convert-from-long-format-to-wide-format-in-pandas-and-or
-        """
-        arr = cid_frame.values
-        idx_index, idx_column, idx_value = [np.where(cid_frame.columns == v)[0] for v in [index, column, value]]
-
-
-        rows, row_pos = np.unique(arr[:, idx_index], return_inverse=True)
-        cols, col_pos = np.unique(arr[:, idx_column], return_inverse=True)
-        pivot_arr = np.zeros((rows.size, cols.size))
-        pivot_arr[row_pos, col_pos] = arr[:, idx_value[0]]
-
-        frame = pd.DataFrame(
-            pivot_arr,
-            columns = cols,
-            index = rows,
-            dtype=bool
-            )
-        frame.index.name = index
-        return frame
-    def DropEmptyGenotyping(self, cid_timeline):
-        """
-        Have qpcr row inherit genotyping passing qpcr
-        Remove empty genotyping results with positive qpcr
-        """
-
-        if self.by_infection_event == False or self.impute_missing == False:
-            return cid_timeline[cid_timeline.index != 'nan']
-        else:
-            cid_timeline.loc['nan'] = cid_timeline.max(axis=0)
-            return cid_timeline
-    def SkipsByHaplotype(self, hid_timelines, cid, post_burnin):
-        """
-        Calculate Skips for each haplotype given an HID_timeline
-        """
-
-        hids = hid_timelines.index
-        dates = hid_timelines.columns
-
-        for idx, hid_arr in enumerate(hid_timelines.values):
-
-            skips = self.PositionalDifference(hid_arr, post_burnin)
-            hid_dates = dates[hid_arr]
-            visit_numbers = np.where(hid_arr)[0]
-
-            if skips.size > 0:
-                self.skip_frame.append(
-                    [[cid, hids[idx], hid_dates[idx_skips], skips[idx_skips], visit_numbers[idx_skips]]
-                    for idx_skips,_ in enumerate(skips)]
-                )
-    def CalculateSkips(self):
-        """
-        - Build timelines for each h_popUID~cohortid combination
-        - Calculate number of skips between each passing qpcr event
-        - Calculate visit number of events
-        - Compile dataframe of skips and visit number
-        """
-
-        self.skip_frame = []
-        cid_group = 'cohortid' if not self.is_bootstrap else 'pseudo_cid'
+        self.InitializeCohort()
+    def InitializeCohort(self):
         # self.frame = self.frame[self.frame.cohortid == '3786']
+        for cid, cid_frame in tqdm(self.frame.groupby('cohortid'), desc='initializing cohort'):
+            t = Individual(cid_frame, skip_threshold = self.skip_threshold)
+            self.cohort.append(t)
+    def LabelInfections(self):
 
-        for cid, cid_frame in tqdm(self.frame.groupby([cid_group]), desc='calculating skips'):
-            burnin = cid_frame.burnin.values[0]
-            self.id_dates[cid] = cid_frame.date.unique()
-
-            # convert long dates to wide
-            cid_timeline = self.BuildTimeline(cid_frame)
-
-            # no genotyping inherit qpcr + drop qpcr if not by_infection_event or not impute_missing
-            cid_timeline = self.DropEmptyGenotyping(cid_timeline)
-
-            post_burnin = self.PostBurnin(cid_timeline.columns, burnin)
-
-            self.SkipsByHaplotype(cid_timeline, cid, post_burnin)
-
-            if self.haplodrops:
-                self.plot_haplodrop(cid_timeline, save=cid)
-
-        self.skips = pd.DataFrame(
-            np.vstack(self.skip_frame),
-            columns = ['cohortid', 'h_popUID', 'date', 'skips', 'visit_number']
-            )
-
-        self.skips.date = self.skips.date.astype('datetime64')
-    def AggregateInfectionEventDate(self):
-        """
-        Aggregate infection events by date, relabel h_popUID as aggregate over id~date
-        """
-
-        rows = []
-        for cid_date, cid_date_frame in self.labels.groupby(['cohortid', 'date']):
-            cid, date = cid_date
-            agg_name = 'agg_{}_{}'.format(cid, date.date())
-
-            rows.append([
-                cid, agg_name, date,
-                cid_date_frame.skips.max(), cid_date_frame.visit_number.min(),
-                cid_date_frame.enrolldate.min(), cid_date_frame.burnin.min(),
-                cid_date_frame.infection_event.max()
+        self.labels = pd.concat([
+            c.LabelInfections(by_clone=True) for c in tqdm(self.cohort, desc='labeling infections')
             ])
 
-        self.labels = pd.DataFrame(rows, columns = self.labels.columns)
-    def AggregateInfectionEvents(self):
-        """
-        Aggregate infection events using skip rule
-        - find all infection events
-        - calculate distance between sequential events
-        - aggregate events not passing skips
-        """
-
-        for cid, cid_frame in tqdm(self.labels.groupby(['cohortid']), desc='aggregating infection events'):
-
-            # build infection event dataframe
-            hid_frame = self.BuildTimeline(cid_frame, value = 'infection_event')
-
-            # fill missing dates
-            missing_dates = self.id_dates[cid][
-                np.isin(self.id_dates[cid], hid_frame.columns, invert=True)
-                ]
-            for d in missing_dates:
-                hid_frame[d] = False
-
-            # sort columns by date
-            hid_frame = hid_frame.loc[:,np.sort(hid_frame.columns.values)]
-
-            # all infection events
-            infection_points = hid_frame.max(axis=0)
-
-            # positive indices
-            pos_infection = np.where(infection_points)[0]
-
-            # skips between infection events
-            point_skips = self.PositionalDifference(infection_points.values, 0)
-
-            # skips past threshold
-            passing_skips = np.where(point_skips > self.allowedSkips)[0]
-
-
-            # dates passing skip threshold
-            passing_dates = infection_points[pos_infection[passing_skips]].index.values
-
-            # subset labels, negate all infection events, flip only those passing aggregation
-            self.labels.infection_event[
-                (self.labels.cohortid == cid) & \
-                np.isin(self.labels.date, passing_dates, invert=True)
-                ] = False
-
-            if self.haplodrops:
-                self.plot_haplodrop(
-                    self.BuildTimeline(self.labels[self.labels.cohortid == cid], value='infection_event'),
-                    save=cid,
-                    prefix='aggIE'
-                )
-    def AggregateInfections(self):
-        """
-        Perform aggregation depending on flags given
-        """
-        if self.by_infection_event:
-            self.AggregateInfectionEventDate()
-
-            if self.agg_infection_event:
-                self.AggregateInfectionEvents()
-    def getLabel(self, row):
-        """label infections as true or false"""
-
-        # visits before burnin are false
-        if row.date <= row.burnin:
-            return False
-
-        # first infection occurs at a timepoint past the allowed skips
-        elif row.skips > self.allowedSkips :
-            return True
-
-        # if infection is never seen before and after burnin then true
-        elif row.skips == row.visit_number:
-            return True
-
-        else:
-            return False
-    def ActiveInfection(self, group):
-        """
-        Label all timepoints where an infection is still active
-        """
-
-        infections = np.where(group.infection_event)[0]
-
-        active_array = np.zeros(group.infection_event.size)
-
-        # for each infection event, label all following infections as active
-        for i in np.arange(infections.size):
-            if i < infections.size - 1:
-                active_array[infections[i] : infections[i+1]] = 1
-            else:
-                active_array[infections[i] : ] = 1
-
-
-        return active_array
-    def getColumns(self):
-        """
-        Returns columns to merge on and columns to keep from frame
-        """
-        merging = ['cohortid', 'date']
-        to_keep = ['cohortid', 'date', 'enrolldate', 'burnin']
-        if not self.by_infection_event:
-            merging.append('h_popUID')
-            to_keep.append('h_popUID')
-        if self.is_bootstrap:
-            to_keep.append('pseudo_cid')
-        return merging, to_keep
-    def LabelActiveInfections(self):
-        """
-        Label active baseline and new infections
-        """
-        self.labels['active_new_infection'] = np.concatenate(
-            self.labels.groupby(['cohortid', 'h_popUID']).apply(
-                lambda x : self.ActiveInfection(x).astype(bool)
-                ).values
-            )
-        self.labels['active_baseline_infection'] = (~self.labels.active_new_infection)
-    def LabelInfections(self):
-        """
-        Label timepoints as infection events
-        &
-        Label subsequence timepoints of infection events as active infections
-        """
-        self.CalculateSkips()
-
-        merging, to_keep = self.getColumns()
-
-        self.labels = self.skips.merge(
-            self.frame[to_keep],
-            left_on = merging,
-            right_on = merging,
-            how='inner'
-            ).drop_duplicates()
-
-        if self.labels.shape[0] == 0:
-            merge_right_pseudo = merging.copy()
-            merge_right_pseudo[0] = 'pseudo_cid'
-            self.labels = self.skips.merge(
-                self.frame[to_keep],
-                left_on = merging,
-                right_on = merge_right_pseudo,
-                how='inner'
-                ).drop_duplicates().\
-                drop(
-                    columns = 'cohortid_x'
-                ).\
-                rename(columns = {
-                    'cohortid_y' : 'cohortid'
-                })
-
-        self.labels['infection_event'] = self.labels.apply(
-            lambda x : self.getLabel(x),
-            axis = 1
-            )
-
-        self.AggregateInfections()
-        self.LabelActiveInfections()
-
         return self.labels
-    def plot_haplodrop(self, cid_timeline, save=False, prefix=None):
-        if cid_timeline.shape[0] == 0:
-            return
-        sns.heatmap(
-            cid_timeline, square=True, linewidths=1,
-            cbar=False, xticklabels=False, yticklabels=False,
-            annot=True
-            )
-        if save:
-            name = '../plots/cid_haplodrop/{}.png'.format(save)
-            if prefix:
-                name = '../plots/cid_haplodrop/{}.{}.png'.format(prefix, save)
 
-            print('saving haplodrop : {}'.format(name))
-            plt.savefig(name)
-        else:
-            plt.show()
 
-        plt.close()
+    # def PostBurnin(self, dates, burnin):
+    #     """
+    #     Find first date past the burnin,
+    #     if burnin is between two visits mark postburnin as midway
+    #     """
+    #     try:
+    #         post_burnin = np.where(dates >= burnin)[0].min()
+    #
+    #     except ValueError:
+    #         return False
+    #
+    #
+    #     if dates[post_burnin] > burnin:
+    #         post_burnin -= 0.5
+    #
+    #     return post_burnin
+    # def PositionalDifference(self, x, post_burnin):
+    #     """
+    #     For a bool array x : calculate number of skips between each truth
+    #     calculate first truth with respect to the number of visits post burnin
+    #     """
+    #     truth = np.where(x)[0]
+    #
+    #     # no qpcr positive events
+    #     if truth.size == 0:
+    #         return np.array([])
+    #
+    #     skip_arr = []
+    #     for i, pos in enumerate(truth):
+    #
+    #         # first occurence of a haplotype
+    #         if i == 0:
+    #
+    #             # make all skips zero pre burnin
+    #             if pos < post_burnin:
+    #                 skips = 0
+    #
+    #             # first visit after burnin is equal to visit number
+    #             else:
+    #                 skips = pos
+    #
+    #
+    #         # every other occurence
+    #         else:
+    #             # disregard pre-burnin skips
+    #             if (truth[i - 1] < post_burnin) & (pos >= post_burnin):
+    #                 skips = pos - math.ceil(post_burnin)
+    #
+    #             # calculate skips in pre-burnin period
+    #             else:
+    #                 skips = pos - truth[i-1] - 1
+    #
+    #         skip_arr.append(skips)
+    #
+    #     return np.array(skip_arr)
+    # def BuildTimeline(self, cid_frame, index='h_popUID', column = 'date', value='pass_qpcr'):
+    #     """
+    #     Awesome numpy pivot function found @
+    #     https://stackoverflow.com/questions/48527091/efficiently-and-simply-convert-from-long-format-to-wide-format-in-pandas-and-or
+    #     """
+    #     arr = cid_frame.values
+    #     idx_index, idx_column, idx_value = [np.where(cid_frame.columns == v)[0] for v in [index, column, value]]
+    #
+    #
+    #     rows, row_pos = np.unique(arr[:, idx_index], return_inverse=True)
+    #     cols, col_pos = np.unique(arr[:, idx_column], return_inverse=True)
+    #     pivot_arr = np.zeros((rows.size, cols.size))
+    #     pivot_arr[row_pos, col_pos] = arr[:, idx_value[0]]
+    #
+    #     frame = pd.DataFrame(
+    #         pivot_arr,
+    #         columns = cols,
+    #         index = rows,
+    #         dtype=bool
+    #         )
+    #     frame.index.name = index
+    #     return frame
+    # def DropEmptyGenotyping(self, cid_timeline):
+    #     """
+    #     Have qpcr row inherit genotyping passing qpcr
+    #     Remove empty genotyping results with positive qpcr
+    #     """
+    #
+    #     if self.by_infection_event == False or self.impute_missing == False:
+    #         return cid_timeline[cid_timeline.index != 'nan']
+    #     else:
+    #         cid_timeline.loc['nan'] = cid_timeline.max(axis=0)
+    #         return cid_timeline
+    # def SkipsByHaplotype(self, hid_timelines, cid, post_burnin):
+    #     """
+    #     Calculate Skips for each haplotype given an HID_timeline
+    #     """
+    #
+    #     hids = hid_timelines.index
+    #     dates = hid_timelines.columns
+    #
+    #     for idx, hid_arr in enumerate(hid_timelines.values):
+    #
+    #         skips = self.PositionalDifference(hid_arr, post_burnin)
+    #         hid_dates = dates[hid_arr]
+    #         visit_numbers = np.where(hid_arr)[0]
+    #
+    #         if skips.size > 0:
+    #             self.skip_frame.append(
+    #                 [[cid, hids[idx], hid_dates[idx_skips], skips[idx_skips], visit_numbers[idx_skips]]
+    #                 for idx_skips,_ in enumerate(skips)]
+    #             )
+    # def CalculateSkips(self):
+    #     """
+    #     - Build timelines for each h_popUID~cohortid combination
+    #     - Calculate number of skips between each passing qpcr event
+    #     - Calculate visit number of events
+    #     - Compile dataframe of skips and visit number
+    #     """
+    #
+    #     self.skip_frame = []
+    #     cid_group = 'cohortid' if not self.is_bootstrap else 'pseudo_cid'
+    #
+    #     for cid, cid_frame in tqdm(self.frame.groupby([cid_group]), desc='calculating skips'):
+    #         burnin = cid_frame.burnin.values[0]
+    #         self.id_dates[cid] = cid_frame.date.unique()
+    #
+    #         # convert long dates to wide
+    #         cid_timeline = self.BuildTimeline(cid_frame)
+    #
+    #         # no genotyping inherit qpcr + drop qpcr if not by_infection_event or not impute_missing
+    #         cid_timeline = self.DropEmptyGenotyping(cid_timeline)
+    #
+    #         post_burnin = self.PostBurnin(cid_timeline.columns, burnin)
+    #
+    #         self.SkipsByHaplotype(cid_timeline, cid, post_burnin)
+    #
+    #         if self.haplodrops:
+    #             self.plot_haplodrop(cid_timeline, save=cid)
+    #
+    #     self.skips = pd.DataFrame(
+    #         np.vstack(self.skip_frame),
+    #         columns = ['cohortid', 'h_popUID', 'date', 'skips', 'visit_number']
+    #         )
+    #
+    #     self.skips.date = self.skips.date.astype('datetime64')
+    # def FillMissingDates(self, hid_frame, cid):
+    #     """
+    #     Fill missing dates in a haplotype timeline given a cohortid
+    #     """
+    #
+    #     # find missing dates
+    #     missing_dates = self.id_dates[cid][
+    #         np.isin(self.id_dates[cid], hid_frame.columns, invert=True)
+    #         ]
+    #
+    #     # fill missing dates
+    #     for d in missing_dates:
+    #         hid_frame[d] = False
+    #
+    #     # sort columns by date
+    #     hid_frame = hid_frame.loc[:,np.sort(hid_frame.columns.values)]
+    #
+    #     return hid_frame
+    # def AggregateInfectionEventDate(self):
+    #     """
+    #     Aggregate infection events by date, relabel h_popUID as aggregate over id~date
+    #     """
+    #
+    #     rows = []
+    #     for cid_date, cid_date_frame in self.labels.groupby(['cohortid', 'date']):
+    #         cid, date = cid_date
+    #         agg_name = 'agg_{}_{}'.format(cid, date.date())
+    #
+    #         rows.append([
+    #             cid, agg_name, date,
+    #             cid_date_frame.skips.max(), cid_date_frame.visit_number.min(),
+    #             cid_date_frame.enrolldate.min(), cid_date_frame.burnin.min(),
+    #             cid_date_frame.infection_event.max()
+    #         ])
+    #
+    #     self.labels = pd.DataFrame(rows, columns = self.labels.columns)
+    # def AggregateInfectionEvents(self):
+    #     """
+    #     Aggregate infection events using skip rule
+    #     - find all infection events
+    #     - calculate distance between sequential events
+    #     - aggregate events not passing skips
+    #     """
+    #
+    #     for cid, cid_frame in tqdm(self.labels.groupby(['cohortid']), desc='aggregating infection events'):
+    #
+    #         # build infection event dataframe
+    #         hid_frame = self.BuildTimeline(cid_frame, value = 'infection_event')
+    #         hid_frame = self.FillMissingDates(hid_frame, cid)
+    #
+    #
+    #         # all infection events
+    #         infection_points = hid_frame.max(axis=0)
+    #
+    #         # positive indices
+    #         pos_infection = np.where(infection_points)[0]
+    #
+    #         # skips between infection events
+    #         point_skips = self.PositionalDifference(infection_points.values, 0)
+    #
+    #         # skips past threshold
+    #         passing_skips = np.where(point_skips > self.skip_threshold)[0]
+    #
+    #         # dates passing skip threshold
+    #         passing_dates = infection_points[pos_infection[passing_skips]].index.values
+    #
+    #         # subset labels, negate all infection events, flip only those passing aggregation
+    #         self.labels.infection_event[
+    #             (self.labels.cohortid == cid) & \
+    #             np.isin(self.labels.date, passing_dates, invert=True)
+    #             ] = False
+    #
+    #         if self.haplodrops:
+    #             self.plot_haplodrop(
+    #                 self.BuildTimeline(self.labels[self.labels.cohortid == cid], value='infection_event'),
+    #                 save=cid,
+    #                 prefix='aggIE'
+    #             )
+    # def AggregateInfections(self):
+    #     """
+    #     Perform aggregation depending on flags given
+    #     """
+    #     if self.by_infection_event:
+    #         self.AggregateInfectionEventDate()
+    #
+    #         if self.agg_infection_event:
+    #             self.AggregateInfectionEvents()
+    # def getLabel(self, row):
+    #     """label infections as true or false"""
+    #
+    #     # visits before burnin are false
+    #     if row.date <= row.burnin:
+    #         return False
+    #
+    #     # first infection occurs at a timepoint past the allowed skips
+    #     elif row.skips > self.skip_threshold :
+    #         return True
+    #
+    #     # if infection is never seen before and after burnin then true
+    #     elif row.skips == row.visit_number:
+    #         return True
+    #
+    #     else:
+    #         return False
+    # def ActiveInfection(self, group):
+    #     """
+    #     Label all timepoints where an infection is still active
+    #     """
+    #
+    #     infections = np.where(group.infection_event)[0]
+    #
+    #     active_array = np.zeros(group.infection_event.size)
+    #
+    #     # for each infection event, label all following infections as active
+    #     for i in np.arange(infections.size):
+    #         if i < infections.size - 1:
+    #             active_array[infections[i] : infections[i+1]] = 1
+    #         else:
+    #             active_array[infections[i] : ] = 1
+    #
+    #
+    #     return active_array
+    # def getColumns(self):
+    #     """
+    #     Returns columns to merge on and columns to keep from frame
+    #     """
+    #     merging = ['cohortid', 'date']
+    #     to_keep = ['cohortid', 'date', 'enrolldate', 'burnin']
+    #     if not self.by_infection_event:
+    #         merging.append('h_popUID')
+    #         to_keep.append('h_popUID')
+    #     if self.is_bootstrap:
+    #         to_keep.append('pseudo_cid')
+    #     return merging, to_keep
+    # def LabelActiveInfections(self):
+    #     """
+    #     Label active baseline and new infections
+    #     """
+    #     self.labels['active_new_infection'] = np.concatenate(
+    #         self.labels.groupby(['cohortid', 'h_popUID']).apply(
+    #             lambda x : self.ActiveInfection(x).astype(bool)
+    #             ).values
+    #         )
+    #     self.labels['active_baseline_infection'] = (~self.labels.active_new_infection)
+    # def LabelInfections(self):
+    #     """
+    #     Label timepoints as infection events
+    #     &
+    #     Label subsequence timepoints of infection events as active infections
+    #     """
+    #     self.CalculateSkips()
+    #
+    #     merging, to_keep = self.getColumns()
+    #
+    #     self.labels = self.skips.merge(
+    #         self.frame[to_keep],
+    #         left_on = merging,
+    #         right_on = merging,
+    #         how='inner'
+    #         ).drop_duplicates()
+    #
+    #     if self.labels.shape[0] == 0:
+    #         merge_right_pseudo = merging.copy()
+    #         merge_right_pseudo[0] = 'pseudo_cid'
+    #         self.labels = self.skips.merge(
+    #             self.frame[to_keep],
+    #             left_on = merging,
+    #             right_on = merge_right_pseudo,
+    #             how='inner'
+    #             ).drop_duplicates().\
+    #             drop(
+    #                 columns = 'cohortid_x'
+    #             ).\
+    #             rename(columns = {
+    #                 'cohortid_y' : 'cohortid'
+    #             })
+    #
+    #     self.labels['infection_event'] = self.labels.apply(
+    #         lambda x : self.getLabel(x),
+    #         axis = 1
+    #         )
+    #
+    #     self.AggregateInfections()
+    #     self.LabelActiveInfections()
+    #
+    #     return self.labels
+    # def plot_haplodrop(self, cid_timeline, save=False, prefix=None):
+    #     if cid_timeline.shape[0] == 0:
+    #         return
+    #     sns.heatmap(
+    #         cid_timeline, square=True, linewidths=1,
+    #         cbar=False, xticklabels=False, yticklabels=False,
+    #         annot=True
+    #         )
+    #     if save:
+    #         name = '../plots/cid_haplodrop/{}.png'.format(save)
+    #         if prefix:
+    #             name = '../plots/cid_haplodrop/{}.{}.png'.format(prefix, save)
+    #
+    #         print('saving haplodrop : {}'.format(name))
+    #         plt.savefig(name)
+    #     else:
+    #         plt.show()
+    #
+    #     plt.close()
 class FOI:
     def __init__(self, labels, meta, burnin=3):
         self.labels = labels
@@ -522,8 +827,8 @@ class FOI:
         else:
             self.frame = self.meta.merge(
                 self.labels,
-                left_on = ['cohortid', 'date', 'enrolldate', 'burnin'],
-                right_on = ['cohortid', 'date', 'enrolldate', 'burnin'],
+                left_on = ['cohortid', 'date', 'enrolldate', 'burnin', 'gender', 'agecat'],
+                right_on = ['cohortid', 'date', 'enrolldate', 'burnin', 'gender', 'agecat'],
                 how = 'left'
                 )
     def AddBurnin(self):
@@ -682,11 +987,11 @@ class BootstrapCID:
             yield self.getSample()
 
 class Survival(object):
-    def __init__(self, infections, meta, burnin=3, allowedSkips=3, bootstrap=False, n_iter=200):
+    def __init__(self, infections, meta, burnin=3, skip_threshold=3, bootstrap=False, n_iter=200):
         self.infections = infections
         self.meta = meta
         self.burnin = burnin
-        self.allowedSkips = allowedSkips
+        self.skip_threshold = skip_threshold
         self.bootstrap = bootstrap
         self.n_iter = n_iter
         self.minimum_duration = pd.Timedelta('15 days')
@@ -843,7 +1148,7 @@ class FractionOldNew(Survival):
                     [j for i,j in self.bootstrap_results[v].values],
                     alpha = 0.5)
         else:
-            sns.lineplot(data=self.original_fractions, x='year_month', y = 'pc', hue='active_new_infection')
+            sns.lineplot(data=self.original_results, x='year_month', y = 'pc', hue='active_new_infection')
 
         plt.xlabel('Date')
         plt.ylabel('Percentage')
@@ -1026,7 +1331,7 @@ class OldWaning(Survival):
         plt.close()
 
 class ExponentialDecay():
-    def __init__(self, infections, left_censor='2018-01-01', right_censor='2019-02-01', minimum_duration=15, seed=None):
+    def __init__(self, infections, left_censor='2018-01-01', right_censor='2019-04-01', minimum_duration=15, seed=None):
         if seed:
             np.random.seed(seed)
 
@@ -1175,9 +1480,10 @@ def dev_infectionLabeler():
     meta = pd.read_csv('../prism2/stata/full_meta_grant_version.tab', sep="\t", low_memory=False)
 
     il = InfectionLabeler(sdo, meta,
-        by_infection_event=False, qpcr_threshold=0.1,
-        burnin=2, haplodrops=False)
+        by_infection_event=False, qpcr_threshold=0,
+        burnin=2, haplodrops=False, skip_threshold=3)
     labels = il.LabelInfections()
+    print(labels)
 def dev_FOI():
     sdo = pd.read_csv('../prism2/full_prism2/final_filter.tab', sep="\t")
     meta = pd.read_csv('../prism2/stata/full_meta_grant_version.tab', sep="\t", low_memory=False)
@@ -1211,12 +1517,36 @@ def dev_BootstrapCID():
 
     sns.distplot(bs_foi.FOI)
     plt.axvline(true_fit.FOI[0])
+
+def DecayByGroup(infections, n_iter=100, group = ['gender'], label=None):
+    ed_classes = []
+    estimated_values = []
+    bootstrapped_values = []
+    indices = []
+    for index, frame in infections.groupby(group):
+        ed = ExponentialDecay(frame)
+        l, bsl = ed.fit(bootstrap=True, n_iter=n_iter)
+
+        indices.append(index)
+        ed_classes.append(ed)
+        estimated_values.append(l)
+        bootstrapped_values.append(bsl)
+
+    for i, _ in enumerate(ed_classes):
+        sns.distplot(1 /bootstrapped_values[i], bins=30)
+        plt.axvline(1/ estimated_values[i], label=indices[i], color=sns.color_palette()[i], linestyle=':', lw=5)
+        plt.legend(labels = indices)
+
+    if label:
+        plt.savefig('../plots/durations/{}.png'.format(label))
+    plt.show()
+
 def dev_Survival():
     sdo = pd.read_csv('../prism2/full_prism2/final_filter.tab', sep="\t")
     meta = pd.read_csv('../prism2/stata/full_meta_grant_version.tab', sep="\t", low_memory=False)
 
     il = InfectionLabeler(sdo, meta,
-        by_infection_event=True, qpcr_threshold=0.1,
+        by_infection_event=False, qpcr_threshold=0.1,
         burnin=2, haplodrops=False)
     labels = il.LabelInfections()
 
@@ -1232,9 +1562,13 @@ def dev_Survival():
     # w.fit()
     # w.plot()
 
-    ed = ExponentialDecay(labels)
-    ed.fit(bootstrap=True)
-    ed.plot()
+    e = ExponentialDecay(infections = labels)
+    e.fit(bootstrap=True)
+    e.plot()
+    # print(labels)
+    # sys.exit()
+    #
+    # DecayByGroup(labels, group='agecat')
 
 def worker_foi(sdo, meta, group):
     labels = InfectionLabeler(sdo, meta, by_infection_event=True, impute_missing=True).LabelInfections()
@@ -1267,7 +1601,7 @@ def multiprocess_FOI():
 
 if __name__ == '__main__':
     # dev_infectionLabeler()
-    dev_Survival()
+    # dev_Survival()
     # dev_FOI()
     # dev_BootstrapLabels()
     # multiprocess_FOI()

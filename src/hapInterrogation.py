@@ -4,7 +4,10 @@
 import pandas as pd
 import numpy as np
 import argparse, sys
-from ama1 import InfectionLabeler, FOI
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+from ama1 import InfectionLabeler, FOI, ExponentialDecay, Survival, FractionOldNew, OldNewSurival, OldWaning
 
 def get_args():
     p = argparse.ArgumentParser()
@@ -21,7 +24,15 @@ def get_args():
     p.add_argument('-f', '--force_of_infection',
         type=str,
         help="Calculate the Force of Infection of the Population (give grouping variables comma separated or write 'none' for no grouping)")
-    p.add_argument('-n', '--allowedSkips',
+    p.add_argument('-d', '--durations',
+        type=str,
+        help="Estimate duration of infections using an exponential decay model (give grouping variables comma separated or write 'none' for no grouping)"
+        )
+    p.add_argument('-s', '--survival',
+        type=str,
+        help='Plot survival of old/new haplotypes (options : fraction_oldnew, survival_oldnewmix, waning_old)'
+        )
+    p.add_argument('-n', '--skip_threshold',
         default = 3,
         type=int,
         help="Number of allowed skips to allow during calculation of durations (default = 3 skips)"
@@ -52,6 +63,11 @@ def get_args():
         required=False,
         help='Dont aggregate infection events following the skip rule when collapsing by date'
         )
+    p.add_argument("--num_bootstraps",
+        default=200,
+        type=int,
+        help='number of times to bootstrap'
+        )
 
     # if no args given print help
     if len(sys.argv) == 1:
@@ -69,7 +85,7 @@ def label_infections(sdo, meta, args):
         sdo, meta,
         qpcr_threshold = args.qpcr_threshold,
         burnin = args.burnin,
-        allowedSkips = args.allowedSkips,
+        skip_threshold = args.skip_threshold,
         by_infection_event = args.by_infection_event,
         impute_missing = args.no_impute,
         agg_infection_event = args.no_aggregation
@@ -101,7 +117,7 @@ def foi(sdo, meta, args):
         sdo, meta,
         qpcr_threshold = args.qpcr_threshold,
         burnin = args.burnin,
-        allowedSkips = args.allowedSkips,
+        skip_threshold = args.skip_threshold,
         by_infection_event = args.by_infection_event,
         impute_missing = args.no_impute,
         agg_infection_event = args.no_aggregation
@@ -111,6 +127,95 @@ def foi(sdo, meta, args):
     f = FOI(labels, meta, burnin = args.burnin)
     result = f.fit(group = group)
     result.to_csv(sys.stdout, sep="\t", index=True)
+
+def DecayByGroup(infections, n_iter=100, group = ['gender'], label=None):
+    ed_classes = []
+    estimated_values = []
+    bootstrapped_values = []
+    indices = []
+    for index, frame in infections.groupby(group):
+        ed = ExponentialDecay(frame)
+        l, bsl = ed.fit(bootstrap=True, n_iter=n_iter)
+
+        indices.append(index)
+        ed_classes.append(ed)
+        estimated_values.append(l)
+        bootstrapped_values.append(bsl)
+
+    for i, _ in enumerate(ed_classes):
+        sns.distplot(1 /bootstrapped_values[i], bins=30)
+        plt.axvline(1/ estimated_values[i], label=indices[i], color=sns.color_palette()[i], linestyle=':', lw=5)
+        plt.legend(labels = indices)
+
+    if label:
+        plt.savefig('../plots/durations/{}.png'.format(label))
+    plt.show()
+def durations(sdo, meta, args):
+    group = args.durations.split(',')
+
+    if group[0] == 'none':
+        group = None
+    else:
+        known_groupings = set(meta.columns)
+
+        known_groupings = np.array([i for i in known_groupings])
+
+        given_groupings = np.array([g in known_groupings for g in group])
+        if np.any(~given_groupings):
+            print('Error :')
+            print("\nunknown values in given set : \n", group)
+            print('\navailable groupings : \n', np.sort(known_groupings))
+            print('\nor "none" for no grouping')
+            sys.exit()
+    il = InfectionLabeler(
+        sdo, meta,
+        qpcr_threshold = args.qpcr_threshold,
+        burnin = args.burnin,
+        skip_threshold = args.skip_threshold,
+        by_infection_event = args.by_infection_event,
+        impute_missing = args.no_impute,
+        agg_infection_event = args.no_aggregation
+    )
+
+    labels = il.LabelInfections()
+    if group:
+        DecayByGroup(labels, n_iter=args.num_bootstraps, group = group)
+    else:
+        e = ExponentialDecay(labels)
+        e.fit(bootstrap=True, n_iter=args.num_bootstraps)
+        e.plot()
+def survival(sdo, meta, args):
+
+    known_methods = ['fraction_oldnew', 'survival_oldnewmix', 'waning_old']
+    if args.survival not in known_methods:
+        sys.exit('Error : choose a method from :', known_methods)
+
+    il = InfectionLabeler(
+        sdo, meta,
+        qpcr_threshold = args.qpcr_threshold,
+        burnin = args.burnin,
+        skip_threshold = args.skip_threshold,
+        by_infection_event = args.by_infection_event,
+        impute_missing = args.no_impute,
+        agg_infection_event = args.no_aggregation
+    )
+
+    labels = il.LabelInfections()
+
+    if known_methods.index(args.survival) == 0 :
+        fon = FractionOldNew(infections=labels, meta=meta, burnin=args.burnin, bootstrap=True, n_iter=args.num_bootstraps)
+        fon.fit()
+        fon.plot()
+
+    elif known_methods.index(args.survival) == 1 :
+        ons = OldNewSurival(infections=labels, meta=meta, burnin=args.burnin, bootstrap=True, n_iter=args.num_bootstraps)
+        ons.fit()
+        ons.plot()
+    else:
+        w = OldWaning(infections = labels, meta=meta, burnin=args.burnin, bootstrap=True, n_iter=args.num_bootstraps)
+        w.fit()
+        w.plot()
+
 def main():
     args = get_args()
     sdo = pd.read_csv(args.seekdeep_output, sep = "\t")
@@ -120,6 +225,10 @@ def main():
         label_infections(sdo, meta, args)
     elif args.force_of_infection:
         foi(sdo, meta, args)
+    elif args.durations:
+        durations(sdo, meta, args)
+    elif args.survival:
+        survival(sdo, meta, args)
 
 if __name__ == '__main__':
     main()
