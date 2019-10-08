@@ -14,15 +14,21 @@ from pkgpr2.pkgpr2 import OldWaning, FractionOldNew, OldNewSurival
 
 def get_args():
     p = argparse.ArgumentParser()
+
+    # seekdeep output
     p.add_argument(
         '-i', '--seekdeep_output', required=False,
         default="../prism2/full_prism2/final_filter.tab",
         help="SeekDeep Output to use as input to functions"
         )
+
+    # meta
     p.add_argument(
         '-m', '--meta', required=False,
         default="../prism2/stata/full_meta_6mo_fu.tab",
         help="Cohort Meta information (tsv) to relate cohortids")
+
+    # label flag
     p.add_argument(
         '-l', '--label_infections',
         action='store_true',
@@ -31,6 +37,8 @@ def get_args():
             "infection of each cohortid~h_popUID"
             )
         )
+
+    # foi flag
     p.add_argument(
         '-f', '--force_of_infection',
         type=str,
@@ -40,6 +48,8 @@ def get_args():
             "or write 'none' for no grouping)"
             )
         )
+
+    # durations flag
     p.add_argument(
         '-d', '--durations',
         type=str,
@@ -48,6 +58,8 @@ def get_args():
             "(give grouping variables comma separated"
             "or write 'none' for no grouping)")
         )
+
+    # survival flag
     p.add_argument(
         '-s', '--survival',
         type=str,
@@ -56,6 +68,8 @@ def get_args():
             '(options : fraction_oldnew, survival_oldnewmix, waning_old)'
             )
         )
+
+    # skip threshold
     p.add_argument(
         '-n', '--skip_threshold',
         default=3,
@@ -65,6 +79,8 @@ def get_args():
             "(default = 3 skips)"
             )
         )
+
+    # burnin
     p.add_argument(
         '-b', '--burnin',
         default=3,
@@ -74,6 +90,8 @@ def get_args():
             "(default = 3 months)"
             )
         )
+
+    # qpcr threshold
     p.add_argument(
         '-q', '--qpcr_threshold',
         default=0,
@@ -81,18 +99,24 @@ def get_args():
         required=False,
         help="qpcr threshold to consider a sample (set to 0 for no threshold)"
         )
+
+    # by infection event
     p.add_argument(
         '--by_infection_event',
-        action='store_true',
+        action='store_false',
         required=False,
-        help='Collapse infection events by individual'
+        help='Aggregate labels by infection events'
         )
+
+    # no impute
     p.add_argument(
         '--no_impute',
         action='store_false',
         required=False,
         help='Dont impute missing haplotypes when collapsing by date '
         )
+
+    # no aggregation
     p.add_argument(
         '--no_aggregation',
         action='store_false',
@@ -102,6 +126,18 @@ def get_args():
             'rule when collapsing by date'
             )
         )
+
+    # no drop missing
+    p.add_argument(
+        "--no_drop_missing",
+        action='store_false',
+        help=(
+            "Count missing genotyping but qpcr positive"
+            "visits in skip calculation"
+            )
+        )
+
+    # number of bootstraps
     p.add_argument(
         "--num_bootstraps",
         default=200,
@@ -134,8 +170,8 @@ def label_infections(sdo, meta, args):
         agg_infection_event=args.no_aggregation
     )
 
-    labels = il.LabelInfections()
-    labels.to_csv(sys.stdout, sep="\t", index=False)
+    labels = il.LabelInfections(by_clone=args.by_infection_event)
+    return labels
 
 
 def foi(sdo, meta, args):
@@ -158,17 +194,7 @@ def foi(sdo, meta, args):
             print('\nor "none" for no grouping')
             sys.exit()
 
-    il = InfectionLabeler(
-        sdo, meta,
-        qpcr_threshold=args.qpcr_threshold,
-        burnin=args.burnin,
-        skip_threshold=args.skip_threshold,
-        by_infection_event=args.by_infection_event,
-        impute_missing=args.no_impute,
-        agg_infection_event=args.no_aggregation
-    )
-
-    labels = il.LabelInfections()
+    labels = label_infections(sdo, meta, args)
     f = FOI(labels, meta, burnin=args.burnin)
     result = f.fit(group=group)
     result.to_csv(sys.stdout, sep="\t", index=True)
@@ -219,17 +245,9 @@ def durations(sdo, meta, args):
             print('\navailable groupings : \n', np.sort(known_groupings))
             print('\nor "none" for no grouping')
             sys.exit()
-    il = InfectionLabeler(
-        sdo, meta,
-        qpcr_threshold=args.qpcr_threshold,
-        burnin=args.burnin,
-        skip_threshold=args.skip_threshold,
-        by_infection_event=args.by_infection_event,
-        impute_missing=args.no_impute,
-        agg_infection_event=args.no_aggregation
-    )
 
-    labels = il.LabelInfections()
+    labels = label_infections(sdo, meta, args)
+
     if group:
         DecayByGroup(labels, n_iter=args.num_bootstraps, group=group)
     else:
@@ -244,17 +262,7 @@ def survival(sdo, meta, args):
     if args.survival not in known_methods:
         sys.exit('Error : choose a method from :', known_methods)
 
-    il = InfectionLabeler(
-        sdo, meta,
-        qpcr_threshold=args.qpcr_threshold,
-        burnin=args.burnin,
-        skip_threshold=args.skip_threshold,
-        by_infection_event=args.by_infection_event,
-        impute_missing=args.no_impute,
-        agg_infection_event=args.no_aggregation
-    )
-
-    labels = il.LabelInfections()
+    labels = label_infections(sdo, meta, args)
 
     if known_methods.index(args.survival) == 0:
         fon = FractionOldNew(
@@ -286,7 +294,8 @@ def main():
     meta = pd.read_csv(args.meta, sep="\t", low_memory=False)
 
     if args.label_infections:
-        label_infections(sdo, meta, args)
+        labels = label_infections(sdo, meta, args)
+        labels.to_csv(sys.stdout, sep="\t", index=True)
     elif args.force_of_infection:
         foi(sdo, meta, args)
     elif args.durations:
