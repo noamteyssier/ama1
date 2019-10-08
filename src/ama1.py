@@ -4,20 +4,24 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
-from tqdm import tqdm
-from multiprocessing import Pool
 
 from pkgpr2.pkgpr2 import InfectionLabeler, FOI, ExponentialDecay
 from pkgpr2.pkgpr2 import OldWaning, FractionOldNew, OldNewSurival
 
 
-
+def load_inputs():
+    sdo = pd.read_csv(
+        '../prism2/full_prism2/final_filter.tab', sep="\t")
+    meta = pd.read_csv(
+        '../prism2/stata/full_meta_grant_version.tab', sep="\t",
+        low_memory=False)
+    return sdo, meta
 
 def dev_infectionLabeler():
-    sdo = pd.read_csv('../prism2/full_prism2/final_filter.tab', sep="\t")
-    meta = pd.read_csv('../prism2/stata/full_meta_grant_version.tab', sep="\t", low_memory=False)
+    sdo, meta = load_inputs()
 
-    il = InfectionLabeler(sdo, meta,
+    il = InfectionLabeler(
+        sdo, meta,
         by_infection_event=False, qpcr_threshold=1, drop_missing=True,
         burnin=2, haplodrops=False, skip_threshold=3)
     labels = il.LabelInfections()
@@ -25,8 +29,7 @@ def dev_infectionLabeler():
 
 
 def dev_FOI():
-    sdo = pd.read_csv('../prism2/full_prism2/final_filter.tab', sep="\t")
-    meta = pd.read_csv('../prism2/stata/full_meta_grant_version.tab', sep="\t", low_memory=False)
+    sdo, meta = load_inputs()
     labels = InfectionLabeler(sdo, meta)
 
 
@@ -62,62 +65,34 @@ def DecayByGroup(infections, n_iter=100, group=['gender'], label=None):
 
 
 def dev_Survival():
-    sdo = pd.read_csv('../prism2/full_prism2/final_filter.tab', sep="\t")
-    meta = pd.read_csv('../prism2/stata/full_meta_grant_version.tab', sep="\t", low_memory=False)
+    sdo, meta = load_inputs()
 
-    il = InfectionLabeler(sdo, meta,
+    il = InfectionLabeler(
+        sdo, meta,
         by_infection_event=False, qpcr_threshold=0.1,
         burnin=2, haplodrops=False)
     labels = il.LabelInfections()
 
-    fon = FractionOldNew(infections=labels, meta=meta, burnin=2, bootstrap=False, n_iter=5)
+    fon = FractionOldNew(
+        infections=labels, meta=meta, burnin=2, bootstrap=False, n_iter=5)
     fon.fit()
     fon.plot()
 
-    ons = OldNewSurival(infections=labels, meta=meta, burnin=2, bootstrap=False, n_iter=5)
+    ons = OldNewSurival(
+        infections=labels, meta=meta, burnin=2, bootstrap=False, n_iter=5)
     ons.fit()
     ons.plot()
 
-    w = OldWaning(infections= labels, meta=meta, burnin=2, bootstrap=True, n_iter=5)
+    w = OldWaning(
+        infections=labels, meta=meta, burnin=2, bootstrap=True, n_iter=5)
     w.fit()
     w.plot()
 
-    labels.date = labels.date.astype('datetime64')
-    e = ExponentialDecay(infections = labels)
+    e = ExponentialDecay(infections=labels)
     e.fit(bootstrap=True)
     e.plot()
 
     DecayByGroup(labels, group='agecat')
-
-def worker_foi(sdo, meta, group):
-    labels = InfectionLabeler(sdo, meta, by_infection_event=True, impute_missing=True).LabelInfections()
-    foi = FOI(labels, meta)
-    full = foi.fit(group=group)
-    return full
-
-
-def multiprocess_FOI():
-    sdo = pd.read_csv('../prism2/full_prism2/final_filter.tab', sep="\t")
-    meta = pd.read_csv('../prism2/stata/full_meta_grant_version.tab', sep="\t", low_memory=False)
-
-    bl = BootstrapCID(meta, seed=42)
-
-    p = Pool(processes=7)
-
-    group = ['gender']
-    bootstrapped_meta = [[sdo, bl.getSample(), group] for _ in tqdm(range(100))]
-    results = p.starmap(worker_foi, bootstrapped_meta)
-
-    bootstrapped_foi = pd.concat(results)
-
-    labels = InfectionLabeler(sdo, meta, by_infection_event=True, impute_missing=True).LabelInfections()
-    foi = FOI(labels, meta)
-    true_foi = foi.fit(group=group)
-
-    for g, sub in bootstrapped_foi.groupby(group):
-        sns.distplot(sub.FOI.values, label=g)
-    [plt.axvline(val) for val in true_foi.FOI.values]
-    plt.legend()
 
 
 if __name__ == '__main__':
