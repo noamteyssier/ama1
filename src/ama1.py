@@ -35,7 +35,6 @@ class Individual(object):
 
         self.QpcrTimeline()
         self.PostBurnin()
-
     def BuildTimeline(self, cid_frame, index = 'h_popUID', column = 'date', value='pass_qpcr'):
         """
         Awesome numpy pivot function found @
@@ -217,6 +216,7 @@ class Individual(object):
         """
         Label active baseline and new infections
         """
+        self.labels.sort_values(['h_popUID', 'date'], inplace=True)
         self.labels['active_new_infection'] = np.concatenate(
             self.labels.groupby(['cohortid', 'h_popUID']).apply(
                 lambda x : self.ActiveInfection(x).astype(bool)
@@ -251,7 +251,6 @@ class Individual(object):
                     self.frame, how='inner'
                     )[to_keep]
 
-            if not self.labels.empty:
                 self.labels['infection_event'] = self.labels.apply(
                     lambda x : self.getLabel(x),
                     axis = 1
@@ -291,7 +290,6 @@ class Individual(object):
             plt.show()
 
         plt.close()
-
 class InfectionLabeler:
     """
     Label Infection events given a qpcr threshold, burnin period, and allowed skips
@@ -411,7 +409,7 @@ class InfectionLabeler:
         self.MergeFrames()
         self.InitializeCohort()
     def InitializeCohort(self):
-        # self.frame = self.frame[self.frame.cohortid == '3786']
+        # self.frame = self.frame[self.frame.cohortid == '3602']
         for cid, cid_frame in tqdm(self.frame.groupby('cohortid'), desc='initializing cohort'):
             t = Individual(cid_frame, skip_threshold = self.skip_threshold)
             self.cohort.append(t)
@@ -422,8 +420,7 @@ class InfectionLabeler:
             ])
 
         return self.labels
-
-
+def old():
     # def PostBurnin(self, dates, burnin):
     #     """
     #     Find first date past the burnin,
@@ -770,6 +767,7 @@ class InfectionLabeler:
     #         plt.show()
     #
     #     plt.close()
+    pass
 class FOI:
     def __init__(self, labels, meta, burnin=3):
         self.labels = labels
@@ -1517,7 +1515,6 @@ def dev_BootstrapCID():
 
     sns.distplot(bs_foi.FOI)
     plt.axvline(true_fit.FOI[0])
-
 def DecayByGroup(infections, n_iter=100, group = ['gender'], label=None):
     ed_classes = []
     estimated_values = []
@@ -1540,7 +1537,6 @@ def DecayByGroup(infections, n_iter=100, group = ['gender'], label=None):
     if label:
         plt.savefig('../plots/durations/{}.png'.format(label))
     plt.show()
-
 def dev_Survival():
     sdo = pd.read_csv('../prism2/full_prism2/final_filter.tab', sep="\t")
     meta = pd.read_csv('../prism2/stata/full_meta_grant_version.tab', sep="\t", low_memory=False)
@@ -1554,18 +1550,18 @@ def dev_Survival():
     # fon.fit()
     # fon.plot()
     #
-    # ons = OldNewSurival(infections=labels, meta=meta, burnin=2, bootstrap=False, n_iter=5)
-    # ons.fit()
-    # ons.plot()
-    #
+    ons = OldNewSurival(infections=labels, meta=meta, burnin=2, bootstrap=False, n_iter=5)
+    ons.fit()
+    ons.plot()
+
     # w = OldWaning(infections = labels, meta=meta, burnin=2, bootstrap=True, n_iter=5)
     # w.fit()
     # w.plot()
 
-    e = ExponentialDecay(infections = labels)
-    e.fit(bootstrap=True)
-    e.plot()
-    # print(labels)
+    # e = ExponentialDecay(infections = labels)
+    # e.fit(bootstrap=True)
+    # e.plot()
+    # # print(labels)
     # sys.exit()
     #
     # DecayByGroup(labels, group='agecat')
