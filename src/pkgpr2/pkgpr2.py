@@ -21,9 +21,7 @@ class Individual(object):
     """
 
     def __init__(self, cid_frame,
-                 skip_threshold=3,
-                 impute_missing=True,
-                 drop_missing=True
+                 skip_threshold=3, impute_missing=True, drop_missing=True
                  ):
         """ Inititalization of Individual object
 
@@ -479,7 +477,7 @@ class InfectionLabeler:
                 )
             self.cohort.append(t)
 
-    def LabelInfections(self):
+    def LabelInfections(self, by_clone=True):
         """
         Label infections for all individuals in the cohort
 
@@ -494,9 +492,10 @@ class InfectionLabeler:
             self.cohort,
             desc='labeling infections'
             )
-
+        if not by_clone:
+            sys.exit('WAT')
         self.labels = pd.concat([
-            c.LabelInfections(by_clone=True) for c in iter_cohort
+            c.LabelInfections(by_clone=by_clone) for c in iter_cohort
             ])
 
         return self.labels
