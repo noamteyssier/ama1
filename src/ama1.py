@@ -18,15 +18,18 @@ class Individual(object):
     """
     Class to handle methods related to an individual in the cohort
     """
-    def __init__(self, cid_frame, skip_threshold=3, impute_missing=True):
+    def __init__(self, cid_frame, skip_threshold=3, impute_missing=True, drop_missing=True):
         self.frame = cid_frame
         self.skip_threshold = skip_threshold
         self.impute_missing = impute_missing
+        self.drop_missing = drop_missing
 
         self.cid = cid_frame.cohortid.unique()[0]
         self.burnin = cid_frame.burnin.unique()[0]
-        self.dates = cid_frame.date.unique()
-        self.hids = cid_frame.h_popUID.unique()
+        self.dates = np.sort(cid_frame.date.unique())
+        self.hids = np.sort(cid_frame.h_popUID.unique())
+
+        self.to_drop = np.array([])
 
 
         self.timeline = pd.DataFrame()
@@ -90,6 +93,12 @@ class Individual(object):
         if truth.size == 0:
             return np.array([])
 
+
+        # remove positive qpcr but no genotyping data from skip calculation
+        if self.drop_missing:
+            for i, x in enumerate(truth):
+                truth[i] = x - np.where(self.to_drop < x)[0].size
+
         skip_arr = []
         for i, pos in enumerate(truth):
 
@@ -133,12 +142,22 @@ class Individual(object):
             min = np.where(self.timeline.loc[hid])[0].min()
             max = np.where(self.timeline.loc[hid])[0].max()
             self.timeline.loc[hid][min:max] = self.timeline.loc['nan'][min:max]
+    def DropMissing(self):
+        """
+        Drop qpcr positive dates with no genotyping data
+        """
+        qpcr_positive = np.where(self.timeline.loc['nan'])[0]
+        single_positive = np.where(self.timeline.sum(axis=0) == 1)[0]
+        self.to_drop = qpcr_positive[np.isin(qpcr_positive, single_positive)]
     def SkipsByClone(self):
         """
         Calculate skips individually by clone
         """
 
         self.skip_frame = []
+        if self.drop_missing:
+            self.DropMissing()
+
         for hid in self.hids[self.hids != 'nan']:
 
             # calculate skips
@@ -295,7 +314,7 @@ class InfectionLabeler:
     Label Infection events given a qpcr threshold, burnin period, and allowed skips
     """
     pd.options.mode.chained_assignment = None
-    def __init__(self, sdo, meta, qpcr_threshold = 0, burnin=3, skip_threshold = 3, by_infection_event=False, impute_missing=True, agg_infection_event=True, haplodrops=False):
+    def __init__(self, sdo, meta, qpcr_threshold = 0, burnin=3, skip_threshold = 3, by_infection_event=False, impute_missing=True, agg_infection_event=True, haplodrops=False, drop_missing=True):
 
         self.sdo = sdo
         self.meta = meta
@@ -305,6 +324,7 @@ class InfectionLabeler:
         self.by_infection_event = by_infection_event
         self.impute_missing = impute_missing
         self.agg_infection_event = agg_infection_event
+        self.drop_missing = drop_missing
         self.haplodrops = haplodrops
         self.is_bootstrap = False
 
@@ -409,9 +429,9 @@ class InfectionLabeler:
         self.MergeFrames()
         self.InitializeCohort()
     def InitializeCohort(self):
-        # self.frame = self.frame[self.frame.cohortid == '3602']
+        # self.frame = self.frame[self.frame.cohortid == '3580']
         for cid, cid_frame in tqdm(self.frame.groupby('cohortid'), desc='initializing cohort'):
-            t = Individual(cid_frame, skip_threshold = self.skip_threshold)
+            t = Individual(cid_frame, skip_threshold = self.skip_threshold, drop_missing=self.drop_missing)
             self.cohort.append(t)
     def LabelInfections(self):
 
@@ -420,6 +440,7 @@ class InfectionLabeler:
             ])
 
         return self.labels
+
 def old():
     # def PostBurnin(self, dates, burnin):
     #     """
@@ -1478,10 +1499,10 @@ def dev_infectionLabeler():
     meta = pd.read_csv('../prism2/stata/full_meta_grant_version.tab', sep="\t", low_memory=False)
 
     il = InfectionLabeler(sdo, meta,
-        by_infection_event=False, qpcr_threshold=0,
+        by_infection_event=False, qpcr_threshold=1, drop_missing=True,
         burnin=2, haplodrops=False, skip_threshold=3)
     labels = il.LabelInfections()
-    print(labels)
+    
 def dev_FOI():
     sdo = pd.read_csv('../prism2/full_prism2/final_filter.tab', sep="\t")
     meta = pd.read_csv('../prism2/stata/full_meta_grant_version.tab', sep="\t", low_memory=False)
@@ -1549,18 +1570,19 @@ def dev_Survival():
     # fon = FractionOldNew(infections=labels, meta=meta, burnin=2, bootstrap=False, n_iter=5)
     # fon.fit()
     # fon.plot()
-    #
-    ons = OldNewSurival(infections=labels, meta=meta, burnin=2, bootstrap=False, n_iter=5)
-    ons.fit()
-    ons.plot()
+
+    # ons = OldNewSurival(infections=labels, meta=meta, burnin=2, bootstrap=False, n_iter=5)
+    # ons.fit()
+    # ons.plot()
 
     # w = OldWaning(infections = labels, meta=meta, burnin=2, bootstrap=True, n_iter=5)
     # w.fit()
     # w.plot()
 
-    # e = ExponentialDecay(infections = labels)
-    # e.fit(bootstrap=True)
-    # e.plot()
+    labels.date = labels.date.astype('datetime64')
+    e = ExponentialDecay(infections = labels)
+    e.fit(bootstrap=True)
+    e.plot()
     # # print(labels)
     # sys.exit()
     #
@@ -1596,7 +1618,7 @@ def multiprocess_FOI():
 
 
 if __name__ == '__main__':
-    # dev_infectionLabeler()
+    dev_infectionLabeler()
     # dev_Survival()
     # dev_FOI()
     # dev_BootstrapLabels()
