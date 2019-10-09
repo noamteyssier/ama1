@@ -162,15 +162,13 @@ class Individual(object):
         """
         Impute missing values of haplotypes based on qpcr values of the samples
         """
-        nan_skips = self.PositionalDifference(self.timeline.loc['nan'])
-        breaks = np.where(nan_skips > self.skip_threshold)[0]
-        if breaks.size > 0:
-            print('need to make this')
-            sys.exit()
 
         for hid in self.hids[self.hids != 'nan']:
-            min = np.where(self.timeline.loc[hid])[0].min()
-            max = np.where(self.timeline.loc[hid])[0].max()
+            try:
+                min = np.where(self.timeline.loc[hid])[0].min()
+                max = np.where(self.timeline.loc[hid])[0].max()
+            except ValueError:
+                min, max = 0, 0
             self.timeline.loc[hid][min:max] = self.timeline.loc['nan'][min:max]
 
     def DropMissing(self):
@@ -181,15 +179,18 @@ class Individual(object):
         single_positive = np.where(self.timeline.sum(axis=0) == 1)[0]
         self.to_drop = qpcr_positive[np.isin(qpcr_positive, single_positive)]
 
-    def SkipsByClone(self):
+    def SkipsByClone(self, impute=False):
         """
         Calculate skips individually by clone
         """
 
-        self.skip_frame = []
-        if self.drop_missing:
+        if self.drop_missing and not impute:
             self.DropMissing()
 
+        if impute and self.impute_missing:
+            self.ImputeMissing()
+
+        self.skip_frame = []
         for hid in self.hids[self.hids != 'nan']:
 
             # calculate skips
@@ -215,11 +216,57 @@ class Individual(object):
 
         if len(self.skip_frame) > 0:
             self.skip_frame = pd.DataFrame(self.skip_frame)
-            self.skip_frame = self.skip_frame[
-                self.skip_frame.h_popUID != 'nan'
-                ]
+
+            if not impute or not self.impute_missing:
+                self.skip_frame = self.skip_frame[
+                    self.skip_frame.h_popUID != 'nan'
+                    ]
         else:
             self.skip_frame = pd.DataFrame()
+
+    def CollapseInfectionEvents(self):
+
+        ifx_events = self.labels[['h_popUID', 'date']][
+            self.labels.infection_event
+            ]
+        ifx_events.sort_values(['h_popUID', 'date'])
+        ifx_dates = ifx_events.date.unique()
+
+        if ifx_dates.size > 0:
+
+            ifx_name_list = []
+            for date, sub in ifx_events.groupby('date'):
+                ifx_name = 'ifx_event.{}'.format(
+                     np.where(ifx_dates == date.to_datetime64())[0][0] + 1
+                     )
+
+                padded_ifx_name = np.full(sub.shape[0], ifx_name)
+                ifx_name_list.append(padded_ifx_name)
+            ifx_events['ie'] = np.concatenate(ifx_name_list)
+
+            self.labels = self.labels.merge(
+                ifx_events,
+                how='left',
+                ).fillna('ifx_event.0')
+
+        else:
+            self.labels['ie'] = 'ifx_event.0'
+
+        self.labels = self.labels.\
+            groupby(['cohortid', 'ie', 'date']).\
+            agg({
+                'skips': 'min',
+                'visit_number': 'min',
+                'enrolldate': 'min',
+                'burnin': 'min',
+                'gender': 'min',
+                'agecat': 'min',
+                'infection_event': 'min',
+                'active_new_infection': 'min',
+                'active_baseline_infection': 'min',
+                }).\
+            reset_index().\
+            rename(columns={'ie': 'h_popUID'})
 
     def ActiveInfection(self, group):
         """
@@ -271,7 +318,7 @@ class Individual(object):
         else:
             return False
 
-    def LabelInfections(self, by_clone=True):
+    def LabelInfections(self, by_clone=True, impute=False):
         to_keep = [
             'cohortid', 'h_popUID', 'date',
             'skips', 'visit_number', 'enrolldate',
@@ -279,7 +326,7 @@ class Individual(object):
             ]
 
         if by_clone:
-            self.SkipsByClone()
+            self.SkipsByClone(impute=impute)
 
             if not self.skip_frame.empty:
                 self.labels = self.skip_frame.merge(
@@ -290,13 +337,16 @@ class Individual(object):
                     lambda x: self.getLabel(x),
                     axis=1
                     )
+
                 self.LabelActiveInfections()
 
-            return self.labels
-
         else:
-            self.SkipsByInfectionEvent()
-            sys.exit()
+            self.LabelInfections(by_clone=True, impute=True)
+
+            if not self.labels.empty:
+                self.CollapseInfectionEvents()
+
+        return self.labels
 
     def plot_haplodrop(self, infection_event=True, save=False, prefix=None):
         """
@@ -462,7 +512,7 @@ class InfectionLabeler:
         """
         Create Individual objects for each individual in the cohort
         """
-        # self.frame = self.frame[self.frame.cohortid == '3580']
+        # self.frame = self.frame[self.frame.cohortid == '3824']
 
         iter_frame = tqdm(
             self.frame.groupby('cohortid'),
@@ -492,8 +542,7 @@ class InfectionLabeler:
             self.cohort,
             desc='labeling infections'
             )
-        if not by_clone:
-            sys.exit('WAT')
+
         self.labels = pd.concat([
             c.LabelInfections(by_clone=by_clone) for c in iter_cohort
             ])

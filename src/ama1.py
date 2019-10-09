@@ -17,15 +17,17 @@ def load_inputs():
         low_memory=False)
     return sdo, meta
 
+
 def dev_infectionLabeler():
     sdo, meta = load_inputs()
 
     il = InfectionLabeler(
         sdo, meta,
-        by_infection_event=False, qpcr_threshold=1, drop_missing=True,
-        burnin=2, haplodrops=False, skip_threshold=3)
-    labels = il.LabelInfections()
+        qpcr_threshold=0, burnin=2
+        )
+    labels = il.LabelInfections(by_clone=False)
     print(labels)
+    print(labels.date.max())
 
 
 def dev_FOI():
