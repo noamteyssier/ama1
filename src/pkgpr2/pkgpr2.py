@@ -178,26 +178,35 @@ class Individual(object):
         """
         Drop qpcr positive dates with no genotyping data
         """
-        qpcr_positive = np.where(self.timeline.loc['nan'])[0]
-        single_positive = np.where(self.timeline.sum(axis=0) == 1)[0]
-        self.to_drop = qpcr_positive[np.isin(qpcr_positive, single_positive)]
 
-    def SkipsByClone(self, impute=False):
+        qpcr_positive = np.where(
+            self.timeline.loc['nan']
+            )[0]
+
+        single_positive = np.where(
+            self.timeline.sum(axis=0) == 1
+            )[0]
+
+        self.to_drop = qpcr_positive[
+            np.isin(qpcr_positive, single_positive)
+            ]
+
+    def HID_Skips(self):
         """
-        Calculate skips individually by clone
+        Generator object that calculates number of skips in a timeline
+        by clone.
+
+        Yields
+        -------
+        dict
+            dictionary organized as columns for skip frame construction
+
         """
 
-        if self.drop_missing and not impute:
-            self.DropMissing()
-
-        if impute and self.impute_missing:
-            self.ImputeMissing()
-
-        self.skip_frame = []
         for hid in self.hids:
 
             if hid == 'nan' and self.hids.size > 1:
-                continue
+                yield None
 
             # calculate skips
             skips = self.PositionalDifference(
@@ -212,23 +221,36 @@ class Individual(object):
 
             # append to growing skip dataframe
             for idx in np.arange(skips.size):
-                self.skip_frame.append({
+                yield {
                     'cohortid': self.cid,
                     'h_popUID': hid,
                     'date': hid_dates[idx],
                     'visit_number': visit_numbers[idx],
                     'skips': skips[idx]
-                })
+                    }
 
-        if len(self.skip_frame) > 0:
-            self.skip_frame = pd.DataFrame(self.skip_frame)
+    def SkipsByClone(self, impute=False):
+        """
+        - Drop qpcr positive missing genotyping visits if required
+        - Impute missing qpcr positive dates if required
+        - Build skip frame over all haplotypes
+        - Drop qpcr timeline if required
+        """
 
-            if not impute or not self.impute_missing:
-                self.skip_frame = self.skip_frame[
-                    self.skip_frame.h_popUID != 'nan'
-                    ]
-        else:
-            self.skip_frame = pd.DataFrame()
+        if self.drop_missing and not impute:
+            self.DropMissing()
+
+        if impute and self.impute_missing:
+            self.ImputeMissing()
+
+        self.skip_frame = pd.DataFrame([
+            h for h in self.HID_Skips() if h
+            ])
+
+        if (~self.skip_frame.empty) & (not impute or not self.impute_missing):
+            self.skip_frame = self.skip_frame[
+                self.skip_frame.h_popUID != 'nan'
+                ]
 
     def CollapseInfectionEvents(self):
 
@@ -396,7 +418,7 @@ class InfectionLabeler(object):
     def __init__(self, sdo, meta,
                  qpcr_threshold=0, burnin=3, skip_threshold=3,
                  by_infection_event=False, impute_missing=True,
-                 agg_infection_event=True, haplodrops=False,
+                 agg_infection_event=True, haplodrop=False,
                  drop_missing=True):
 
         self.sdo = sdo
@@ -408,7 +430,7 @@ class InfectionLabeler(object):
         self.impute_missing = impute_missing
         self.agg_infection_event = agg_infection_event
         self.drop_missing = drop_missing
-        self.haplodrops = haplodrops
+        self.haplodrop = haplodrop
 
         # post processed sdo + meta
         self.frame = pd.DataFrame()
@@ -536,7 +558,8 @@ class InfectionLabeler(object):
                 cid_frame,
                 skip_threshold=self.skip_threshold,
                 drop_missing=self.drop_missing,
-                haplodrop=True
+                haplodrop=self.haplodrop,
+                impute_missing=self.impute_missing
                 )
             self.cohort.append(t)
 
