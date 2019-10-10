@@ -29,7 +29,7 @@ def dev_infectionLabeler():
         sdo, meta,
         qpcr_threshold=0, burnin=2
         )
-    labels = il.LabelInfections(by_clone=False)
+    il.LabelInfections(by_clone=True)
 
 
 def dev_FOI():

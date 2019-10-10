@@ -65,7 +65,6 @@ class Individual(object):
 
         self.QpcrTimeline()
         self.PostBurnin()
-
     def BuildTimeline(self, cid_frame,
                       index='h_popUID',
                       column='date',
@@ -222,14 +221,24 @@ class Individual(object):
             """
             eval = self.to_drop - x
             possible = np.where(eval > 0)[0]
-            within_range = np.where(eval <= self.skip_threshold)[0]
+            within_range = np.where(eval[possible] <= self.skip_threshold)[0]
 
-            result = np.intersect1d(
-                possible, within_range,
-                assume_unique=True
-                )
+            if within_range.size == 0:
+                return within_range
 
-            return self.to_drop[result]
+            possible_range = np.zeros(possible.max() + 1, dtype=bool)
+            possible_range[possible] = True
+            possible_skips = self.PositionalDifference(possible_range, 0)
+
+            possible_within_range = np.where(
+                possible_skips.cumsum() <= self.skip_threshold
+                )[0]
+
+            result = self.to_drop[
+                possible[possible_within_range]
+                ]
+
+            return result
 
         to_fill = map(evaluate, truth)
 
@@ -399,6 +408,24 @@ class Individual(object):
             reset_index().\
             rename(columns={'ie': 'h_popUID'})
 
+        infection_mins = self.labels.\
+            groupby('h_popUID').\
+            apply(
+                lambda x: np.where(self.dates == x.date[0].to_datetime64())[0][0]
+                ).\
+            reset_index().\
+            rename(columns={0: 'date_pos'})
+
+        if infection_mins.shape[0] > 1:
+            infection_mins['date_skips'] = self.PositionalDifference(
+                    infection_mins.date_pos.values + 1, 0
+                    )
+
+            infection_mins['rename'] = infection_mins.h_popUID.min()
+            self.labels = self.labels.merge(infection_mins, how = 'left')
+            self.labels['h_popUID'] = self.labels['rename']
+            self.labels = self.labels.drop(columns=['date_pos', 'date_skips', 'rename'])
+
     def ActiveInfection(self, group):
         """
         Label all timepoints where an infection is still active
@@ -475,6 +502,7 @@ class Individual(object):
             if not self.labels.empty:
                 self.CollapseInfectionEvents()
 
+        print(self.labels)
         return self.labels
 
     def plot_haplodrop(self, infection_event=True, save=False, prefix=None):
@@ -647,7 +675,7 @@ class InfectionLabeler(object):
         """
         Create Individual objects for each individual in the cohort
         """
-        # self.frame = self.frame[self.frame.cohortid == '3079']
+        # self.frame = self.frame[self.frame.cohortid == '3506']
 
         iter_frame = tqdm(
             self.frame.groupby('cohortid'),
