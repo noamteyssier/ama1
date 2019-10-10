@@ -5,8 +5,12 @@ import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
 
-from pkgpr2.pkgpr2 import InfectionLabeler, FOI, ExponentialDecay
-from pkgpr2.pkgpr2 import OldWaning, FractionOldNew, OldNewSurival
+from pkgpr2.pkgpr2 import InfectionLabeler
+from pkgpr2.pkgpr2 import FOI
+from pkgpr2.pkgpr2 import ExponentialDecay
+from pkgpr2.pkgpr2 import OldWaning
+from pkgpr2.pkgpr2 import FractionOldNew
+from pkgpr2.pkgpr2 import OldNewSurival
 
 
 def load_inputs():
@@ -26,8 +30,6 @@ def dev_infectionLabeler():
         qpcr_threshold=0, burnin=2
         )
     labels = il.LabelInfections(by_clone=False)
-    print(labels)
-    print(labels.date.max())
 
 
 def dev_FOI():
@@ -71,30 +73,29 @@ def dev_Survival():
 
     il = InfectionLabeler(
         sdo, meta,
-        by_infection_event=False, qpcr_threshold=0.1,
-        burnin=2, haplodrops=False)
-    labels = il.LabelInfections()
+        burnin=2, qpcr_threshold=0)
+    labels = il.LabelInfections(by_clone=True)
 
-    fon = FractionOldNew(
-        infections=labels, meta=meta, burnin=2, bootstrap=False, n_iter=5)
-    fon.fit()
-    fon.plot()
+    # fon = FractionOldNew(
+    #     infections=labels, meta=meta, burnin=2, bootstrap=False, n_iter=5)
+    # fon.fit()
+    # fon.plot()
+    #
+    # ons = OldNewSurival(
+    #     infections=labels, meta=meta, burnin=2, bootstrap=False, n_iter=5)
+    # ons.fit()
+    # ons.plot()
+    #
+    # w = OldWaning(
+    #     infections=labels, meta=meta, burnin=2, bootstrap=True, n_iter=5)
+    # w.fit()
+    # w.plot()
 
-    ons = OldNewSurival(
-        infections=labels, meta=meta, burnin=2, bootstrap=False, n_iter=5)
-    ons.fit()
-    ons.plot()
-
-    w = OldWaning(
-        infections=labels, meta=meta, burnin=2, bootstrap=True, n_iter=5)
-    w.fit()
-    w.plot()
-
-    e = ExponentialDecay(infections=labels)
+    e = ExponentialDecay(infections=labels[labels.date <= pd.to_datetime('2019-04-01')])
     e.fit(bootstrap=True)
     e.plot()
 
-    DecayByGroup(labels, group='agecat')
+    # DecayByGroup(labels, group='agecat')
 
 
 if __name__ == '__main__':

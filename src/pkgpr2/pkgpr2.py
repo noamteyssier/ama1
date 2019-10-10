@@ -11,6 +11,7 @@ from tqdm import tqdm
 from scipy.optimize import minimize
 
 pd.plotting.register_matplotlib_converters()
+sns.set(rc={'figure.figsize': (30, 30), 'lines.linewidth': 2})
 
 # Cohort Level
 
@@ -21,7 +22,8 @@ class Individual(object):
     """
 
     def __init__(self, cid_frame,
-                 skip_threshold=3, impute_missing=True, drop_missing=True
+                 skip_threshold=3, impute_missing=True, drop_missing=True,
+                 haplodrop=False
                  ):
         """ Inititalization of Individual object
 
@@ -48,6 +50,7 @@ class Individual(object):
         self.skip_threshold = skip_threshold
         self.impute_missing = impute_missing
         self.drop_missing = drop_missing
+        self.haplodrop = haplodrop
 
         self.cid = cid_frame.cohortid.unique()[0]
         self.burnin = cid_frame.burnin.unique()[0]
@@ -191,7 +194,10 @@ class Individual(object):
             self.ImputeMissing()
 
         self.skip_frame = []
-        for hid in self.hids[self.hids != 'nan']:
+        for hid in self.hids:
+
+            if hid == 'nan' and self.hids.size > 1:
+                continue
 
             # calculate skips
             skips = self.PositionalDifference(
@@ -366,9 +372,11 @@ class Individual(object):
             annot=True
             )
         if save:
-            name = '../plots/cid_haplodrop/{}.png'.format(save)
+            name = '../plots/cid_haplodrop/{}.png'.format(self.cid)
             if prefix:
-                name = '../plots/cid_haplodrop/{}.{}.png'.format(prefix, save)
+                name = '../plots/cid_haplodrop/{}.{}.png'.format(
+                    prefix, self.cid
+                    )
 
             print('saving haplodrop : {}'.format(name))
             plt.savefig(name)
@@ -378,7 +386,7 @@ class Individual(object):
         plt.close()
 
 
-class InfectionLabeler:
+class InfectionLabeler(object):
     """
     Label Infection events given a qpcr threshold,
     burnin period, and allowed skips
@@ -471,6 +479,10 @@ class InfectionLabeler:
         self.frame['h_popUID'] = self.frame['h_popUID'].astype(str)
         self.frame.date = self.frame.date
 
+        self.frame = self.frame[
+            ~np.isnan(self.frame.qpcr)
+            ]
+
     def AddBurnin(self):
         """
         Generate burnin and add to Meta
@@ -512,7 +524,7 @@ class InfectionLabeler:
         """
         Create Individual objects for each individual in the cohort
         """
-        # self.frame = self.frame[self.frame.cohortid == '3824']
+        # self.frame = self.frame[self.frame.cohortid == '3079']
 
         iter_frame = tqdm(
             self.frame.groupby('cohortid'),
@@ -523,7 +535,8 @@ class InfectionLabeler:
             t = Individual(
                 cid_frame,
                 skip_threshold=self.skip_threshold,
-                drop_missing=self.drop_missing
+                drop_missing=self.drop_missing,
+                haplodrop=True
                 )
             self.cohort.append(t)
 
@@ -553,7 +566,7 @@ class InfectionLabeler:
 # Metrics
 
 
-class FOI:
+class FOI(object):
 
     def __init__(self, labels, meta, burnin=3):
         self.labels = labels
@@ -712,7 +725,7 @@ class FOI:
         return foi.reset_index()
 
 
-class ExponentialDecay():
+class ExponentialDecay(object):
 
     def __init__(self, infections,
                  left_censor='2018-01-01',
