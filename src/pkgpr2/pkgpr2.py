@@ -332,7 +332,7 @@ class Individual(object):
         - Drop qpcr timeline if required
         """
 
-        if self.drop_missing and not impute:
+        if self.drop_missing:
             self.DropMissing()
 
         if impute and self.impute_missing:
@@ -365,12 +365,20 @@ class Individual(object):
 
                 padded_ifx_name = np.full(sub.shape[0], ifx_name)
                 ifx_name_list.append(padded_ifx_name)
+
             ifx_events['ie'] = np.concatenate(ifx_name_list)
 
             self.labels = self.labels.merge(
                 ifx_events,
                 how='left',
                 ).fillna('ifx_event.0')
+
+            for hdi, sub in ifx_events.groupby(['h_popUID', 'date', 'ie']):
+                hid, date, ie = hdi
+                self.labels.ie[
+                    (self.labels.h_popUID == hid) & (
+                        self.labels.date >= date)
+                    ] = ie
 
         else:
             self.labels['ie'] = 'ifx_event.0'
