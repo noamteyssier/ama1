@@ -98,7 +98,11 @@ class Individual(object):
         """
         Build timeline based on whether values pass qpcr_threshold
         """
-        self.timeline = self.BuildTimeline(self.frame, value='pass_qpcr')
+
+        self.timeline = self.BuildTimeline(
+            self.frame, value='pass_qpcr'
+            )
+
         self.timeline.loc['nan'] = self.timeline.max(axis=0)
 
     def PostBurnin(self):
@@ -130,8 +134,17 @@ class Individual(object):
 
         # remove positive qpcr but no genotyping data from skip calculation
         if self.drop_missing:
+
+            # find dates not already inserted to truth
+            hid_to_drop = self.to_drop[
+                ~np.isin(self.to_drop, truth)
+                ]
+
+            # reduce position of skips where necessary
             for i, x in enumerate(truth):
-                truth[i] = x - np.where(self.to_drop < x)[0].size
+                truth[i] = x - np.where(
+                    (hid_to_drop < x)
+                    )[0].size
 
         skip_arr = []
         for i, pos in enumerate(truth):
@@ -163,7 +176,8 @@ class Individual(object):
 
     def ImputeMissing(self):
         """
-        Impute missing values of haplotypes based on qpcr values of the samples
+        Impute missing values of haplotypes
+        based on qpcr values of the samples
         """
 
         for hid in self.hids[self.hids != 'nan']:
@@ -174,22 +188,101 @@ class Individual(object):
                 min, max = 0, 0
             self.timeline.loc[hid][min:max] = self.timeline.loc['nan'][min:max]
 
-    def DropMissing(self):
+    def FillMissing(self, truth):
+        """
+        Generator to take positive qpcr events that are missing genotyping data
+        and yield positions that must be inserted into the truth array of a
+        clone
+
+        Parameters
+        ----------
+        truth : np.array
+            All positions of a clone where qpcr positive events occur
+
+        Yields
+        -------
+        int
+            Positions that must be inserted or appended into the truth
+            array to reflect positive qpcr events that are missing
+            genotyping
+
+        """
+
+        def evaluate(x):
+            """
+            evaluation function to insert a qpcr positive date.
+
+            x : query date
+            q+ : qpcr positive dates
+
+            condition 1 : the q+ - x to be greater than zero
+            condition 2 : the q+ - x less than skips threshold
+
+            return : True if both, False otherwise
+            """
+            eval = self.to_drop - x
+            possible = np.where(eval > 0)[0]
+            within_range = np.where(eval <= self.skip_threshold)[0]
+
+            result = np.intersect1d(
+                possible, within_range,
+                assume_unique=True
+                )
+
+            return self.to_drop[result]
+
+        to_fill = map(evaluate, truth)
+
+        known = set()
+        for i in to_fill:
+            for j in i:
+                if j not in known:
+                    known.add(j)
+                    yield j
+
+    def DropMissing(self, recurse=False):
         """
         Drop qpcr positive dates with no genotyping data
         """
 
-        qpcr_positive = np.where(
-            self.timeline.loc['nan']
-            )[0]
+        if not recurse:
+            qpcr_positive = np.where(
+                self.timeline.loc['nan']
+                )[0]
 
-        single_positive = np.where(
-            self.timeline.sum(axis=0) == 1
-            )[0]
+            single_positive = np.where(
+                self.timeline.sum(axis=0) == 1
+                )[0]
 
-        self.to_drop = qpcr_positive[
-            np.isin(qpcr_positive, single_positive)
-            ]
+            self.to_drop = qpcr_positive[
+                np.isin(qpcr_positive, single_positive)
+                ]
+
+            self.DropMissing(recurse=True)
+
+        else:
+
+            for hid in self.hids[self.hids != 'nan']:
+
+                # all q+ dates for haplotype
+                truth = np.where(
+                    self.timeline.loc[hid]
+                    )[0]
+
+                # q+ dates inserted if conditions met
+                filled_truth = np.sort(
+                    np.concatenate([
+                            truth,
+                            [i for i in self.FillMissing(truth)]
+                        ]).astype(int)
+                    )
+
+                # new array created
+                replacement = np.zeros(self.timeline.loc[hid].size, dtype=bool)
+                replacement[filled_truth.astype(int)] = True
+
+                # replace original array with inserted values
+                self.timeline.loc[hid] = replacement
 
     def HID_Skips(self):
         """
@@ -206,18 +299,20 @@ class Individual(object):
         for hid in self.hids:
 
             if hid == 'nan' and self.hids.size > 1:
-                yield None
+                continue
+
+            hid_arr = self.timeline.loc[hid]
 
             # calculate skips
             skips = self.PositionalDifference(
-                self.timeline.loc[hid], self.post_burnin
+                hid_arr, self.post_burnin
                 )
 
             # find dates where h_popUID is present
-            hid_dates = self.dates[self.timeline.loc[hid]]
+            hid_dates = self.dates[hid_arr]
 
             # report visit number of hid_dates
-            visit_numbers = np.where(self.timeline.loc[hid])[0]
+            visit_numbers = np.where(hid_arr)[0]
 
             # append to growing skip dataframe
             for idx in np.arange(skips.size):
@@ -347,19 +442,17 @@ class Individual(object):
             return False
 
     def LabelInfections(self, by_clone=True, impute=False):
-        to_keep = [
-            'cohortid', 'h_popUID', 'date',
-            'skips', 'visit_number', 'enrolldate',
-            'burnin', 'gender', 'agecat'
-            ]
+        merge_cols = ['cohortid', 'enrolldate', 'burnin', 'gender', 'agecat']
 
         if by_clone:
             self.SkipsByClone(impute=impute)
 
             if not self.skip_frame.empty:
+
                 self.labels = self.skip_frame.merge(
-                    self.frame, how='inner'
-                    )[to_keep]
+                    self.frame[merge_cols].iloc[:1],
+                    how='left'
+                    )
 
                 self.labels['infection_event'] = self.labels.apply(
                     lambda x: self.getLabel(x),
