@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
+import sys
 
 from pkgpr2.pkgpr2 import InfectionLabeler
 from pkgpr2.pkgpr2 import FOI
@@ -26,10 +27,20 @@ def dev_infectionLabeler():
     sdo, meta = load_inputs()
 
     il = InfectionLabeler(
-        sdo, meta,
+        sdo, meta, haplodrop=False,
         qpcr_threshold=0, burnin=2
         )
-    il.LabelInfections(by_clone=True)
+
+    labels_a = il.LabelInfections(by_clone=True)
+    sys.exit(labels_a)
+    labels_b = il.LabelInfections(by_clone=False)
+
+
+    labels_a.infection_event.sum()
+    labels_b[labels_b.date < pd.to_datetime('2019-04-01')].infection_event.sum()
+
+    labels_a.groupby('cohortid').apply(lambda x : x.infection_event.sum()).reset_index().to_csv(sys.stdout, sep="\t")
+    labels_b.groupby('cohortid').apply(lambda x : x.infection_event.sum()).reset_index().to_csv(sys.stdout, sep="\t")
 
 
 def dev_FOI():

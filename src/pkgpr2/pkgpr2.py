@@ -65,6 +65,8 @@ class Individual(object):
 
         self.QpcrTimeline()
         self.PostBurnin()
+        if self.haplodrop:
+            self.plot_haplodrop(save=True)
 
     def BuildTimeline(self, cid_frame,
                       index='h_popUID',
@@ -121,7 +123,7 @@ class Individual(object):
 
         return self.post_burnin
 
-    def PositionalDifference(self, x, position=0):
+    def PositionalDifference(self, x, position=0, add_one=False):
         """
         For a bool array x : calculate number of skips between each truth
         calculate first truth with respect to the number of visits post burnin
@@ -172,7 +174,12 @@ class Individual(object):
 
             skip_arr.append(skips)
 
-        return np.array(skip_arr)
+        skip_arr = np.array(skip_arr)
+
+        if add_one:
+            skip_arr = skip_arr + 1
+
+        return skip_arr
 
     def FillMissing(self, truth, impute=False):
         """
@@ -421,7 +428,7 @@ class Individual(object):
             date_pos_arr[infection_mins.date_pos] = True
 
             infection_mins['date_skips'] = self.PositionalDifference(
-                    date_pos_arr, 0
+                    date_pos_arr, 0, add_one=True
                     )
 
             infection_mins['rename'] = infection_mins.h_popUID.copy()
@@ -446,6 +453,16 @@ class Individual(object):
             self.labels = self.labels.drop(
                 columns=['date_pos', 'date_skips', 'rename']
                 )
+
+            ifx_size = self.labels.\
+                groupby('h_popUID').\
+                apply(
+                    lambda x: x.infection_event.cumsum()
+                    ).values
+
+            self.labels.infection_event[
+                np.where(ifx_size > 1)[0]
+                ] = False
 
     def ActiveInfection(self, group):
         """
@@ -565,7 +582,7 @@ class InfectionLabeler(object):
     pd.options.mode.chained_assignment = None
 
     def __init__(self, sdo, meta,
-                 qpcr_threshold=0, burnin=3, skip_threshold=3,
+                 qpcr_threshold=0, burnin=2, skip_threshold=3,
                  by_infection_event=False, impute_missing=True,
                  agg_infection_event=True, haplodrop=False,
                  drop_missing=True):
@@ -695,7 +712,6 @@ class InfectionLabeler(object):
         """
         Create Individual objects for each individual in the cohort
         """
-        self.frame = self.frame[self.frame.cohortid == '3285']
 
         iter_frame = tqdm(
             self.frame.groupby('cohortid'),

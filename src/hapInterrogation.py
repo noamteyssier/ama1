@@ -83,7 +83,7 @@ def get_args():
     # burnin
     p.add_argument(
         '-b', '--burnin',
-        default=3,
+        default=2,
         type=int,
         help=(
             "Number of months to consider a patient in burnin period "
