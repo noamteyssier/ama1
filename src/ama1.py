@@ -31,9 +31,9 @@ def dev_infectionLabeler():
         qpcr_threshold=0, burnin=2
         )
 
-    labels_a = il.LabelInfections(by_clone=True)
-    sys.exit(labels_a)
+    # labels_a = il.LabelInfections(by_clone=True)
     labels_b = il.LabelInfections(by_clone=False)
+    sys.exit(labels_b)
 
 
     labels_a.infection_event.sum()

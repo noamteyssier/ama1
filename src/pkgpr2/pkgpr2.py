@@ -561,7 +561,8 @@ class Individual(object):
 
         sns.heatmap(
             timeline, square=True, linewidths=1,
-            cbar=False, xticklabels=False, yticklabels=False,
+            cbar=False, xticklabels=np.where(timeline.columns)[0],
+            yticklabels=False,
             annot=True
             )
         if save:
@@ -717,8 +718,6 @@ class InfectionLabeler(object):
         """
         Create Individual objects for each individual in the cohort
         """
-
-        self.frame = self.frame[self.frame.cohortid == '3202']
 
         iter_frame = tqdm(
             self.frame.groupby('cohortid'),
