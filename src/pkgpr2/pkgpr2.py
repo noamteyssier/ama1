@@ -123,7 +123,10 @@ class Individual(object):
 
         return self.post_burnin
 
-    def PositionalDifference(self, x, position=0, add_one=False):
+    def PositionalDifference(self, x,
+                             position=0, add_one=False,
+                             skip_drop=True
+                             ):
         """
         For a bool array x : calculate number of skips between each truth
         calculate first truth with respect to the number of visits post burnin
@@ -135,7 +138,7 @@ class Individual(object):
             return np.array([])
 
         # remove positive qpcr but no genotyping data from skip calculation
-        if self.drop_missing:
+        if self.drop_missing and not skip_drop:
 
             # find dates not already inserted to truth
             hid_to_drop = self.to_drop[
@@ -220,9 +223,15 @@ class Individual(object):
             if within_range.size == 0:
                 return within_range
 
-            possible_range = np.zeros(possible.max() + 1, dtype=bool)
-            possible_range[possible] = True
-            possible_skips = self.PositionalDifference(possible_range, 0)
+            possible_values = eval[possible]
+
+            possible_range = np.zeros(possible_values.max() + 1, dtype=bool)
+
+            possible_range[possible_values] = True
+
+            possible_skips = self.PositionalDifference(
+                possible_range, 0, skip_drop=True
+                )
 
             possible_within_range = np.where(
                 possible_skips.cumsum() <= self.skip_threshold
@@ -708,6 +717,8 @@ class InfectionLabeler(object):
         """
         Create Individual objects for each individual in the cohort
         """
+
+        self.frame = self.frame[self.frame.cohortid == '3202']
 
         iter_frame = tqdm(
             self.frame.groupby('cohortid'),
