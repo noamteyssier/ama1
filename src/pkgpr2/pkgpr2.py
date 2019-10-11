@@ -411,13 +411,9 @@ class Individual(object):
 
         infection_mins = self.labels.\
             groupby('h_popUID').\
-            apply(
-                lambda x: np.where(
-                    self.dates == x.date[0].to_datetime64()
-                    )[0][0]
-                ).\
+            agg({'visit_number': 'min'}).\
             reset_index().\
-            rename(columns={0: 'date_pos'})
+            rename(columns={'visit_number': 'date_pos'})
 
         if infection_mins.shape[0] > 1:
             date_pos_arr = np.zeros(
