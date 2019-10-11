@@ -174,21 +174,7 @@ class Individual(object):
 
         return np.array(skip_arr)
 
-    def ImputeMissing(self):
-        """
-        Impute missing values of haplotypes
-        based on qpcr values of the samples
-        """
-
-        for hid in self.hids[self.hids != 'nan']:
-            try:
-                min = np.where(self.timeline.loc[hid])[0].min()
-                max = np.where(self.timeline.loc[hid])[0].max()
-            except ValueError:
-                min, max = 0, 0
-            self.timeline.loc[hid][min:max] = self.timeline.loc['nan'][min:max]
-
-    def FillMissing(self, truth):
+    def FillMissing(self, truth, impute=False):
         """
         Generator to take positive qpcr events that are missing genotyping data
         and yield positions that must be inserted into the truth array of a
@@ -208,7 +194,7 @@ class Individual(object):
 
         """
 
-        def evaluate(x):
+        def evaluate(x, impute):
             """
             evaluation function to insert a qpcr positive date.
 
@@ -239,9 +225,15 @@ class Individual(object):
                 possible[possible_within_range]
                 ]
 
+            if not impute:
+                result = result[result <= x.max()]
+
             return result
 
-        to_fill = map(evaluate, truth)
+        to_fill = map(
+            lambda x: evaluate(x, impute),
+            truth
+            )
 
         known = set()
         for i in to_fill:
@@ -250,7 +242,7 @@ class Individual(object):
                     known.add(j)
                     yield j
 
-    def DropMissing(self, recurse=False):
+    def DropMissing(self, recurse=False, impute=False):
         """
         Drop qpcr positive dates with no genotyping data
         """
@@ -268,7 +260,7 @@ class Individual(object):
                 np.isin(qpcr_positive, single_positive)
                 ]
 
-            self.DropMissing(recurse=True)
+            self.DropMissing(recurse=True, impute=impute)
 
         else:
 
@@ -283,7 +275,7 @@ class Individual(object):
                 filled_truth = np.sort(
                     np.concatenate([
                             truth,
-                            [i for i in self.FillMissing(truth)]
+                            [i for i in self.FillMissing(truth, impute=impute)]
                         ]).astype(int)
                     )
 
@@ -343,10 +335,7 @@ class Individual(object):
         """
 
         if self.drop_missing:
-            self.DropMissing()
-
-        if impute and self.impute_missing:
-            self.ImputeMissing()
+            self.DropMissing(impute=impute)
 
         self.skip_frame = pd.DataFrame([
             h for h in self.HID_Skips() if h
@@ -706,7 +695,7 @@ class InfectionLabeler(object):
         """
         Create Individual objects for each individual in the cohort
         """
-        # self.frame = self.frame[self.frame.cohortid == '3769']
+        self.frame = self.frame[self.frame.cohortid == '3285']
 
         iter_frame = tqdm(
             self.frame.groupby('cohortid'),
@@ -743,7 +732,6 @@ class InfectionLabeler(object):
             c.LabelInfections(by_clone=by_clone) for c in iter_cohort
             ])
 
-        sys.exit(self.labels)
         return self.labels
 
 
