@@ -233,13 +233,17 @@ class Individual(object):
                 possible_range, 0, skip_drop=True
                 )
 
-            possible_within_range = np.where(
-                possible_skips.cumsum() <= self.skip_threshold
-                )[0]
+            skip_limit = np.where(possible_skips > self.skip_threshold)[0]
+            if skip_limit.size > 0:
 
-            result = self.to_drop[
-                possible[possible_within_range]
-                ]
+                result = self.to_drop[
+                    possible[:skip_limit.min()]
+                    ]
+            else:
+
+                result = self.to_drop[
+                    possible
+                    ]
 
             if not impute:
                 result = result[result <= x.max()]
