@@ -469,6 +469,8 @@ class Individual(object):
                     lambda x: x.infection_event.cumsum()
                     ).values
 
+            ifx_size = ifx_size.reshape(-1)
+
             self.labels.infection_event[
                 np.where(ifx_size > 1)[0]
                 ] = False
@@ -722,6 +724,8 @@ class InfectionLabeler(object):
         """
         Create Individual objects for each individual in the cohort
         """
+
+        # self.frame = self.frame[self.frame.cohortid == '3506']
 
         iter_frame = tqdm(
             self.frame.groupby('cohortid'),
