@@ -449,6 +449,11 @@ class Individual(object):
             if i == 0:
                 continue
             else:
+
+                # post baseline infections cannot be grouped into baseline
+                if infection_mins['rename'].iloc[i-1] == 'ifx_event.0':
+                    continue
+
                 infection_mins['rename'].iloc[i] = \
                     infection_mins['rename'].iloc[i-1]
 
