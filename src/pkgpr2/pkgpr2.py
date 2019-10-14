@@ -366,19 +366,19 @@ class Individual(object):
                 self.skip_frame.h_popUID != 'nan'
                 ]
 
-    def CollapseInfectionEvents(self):
+    def LabelInfectionEvents(self):
+        """
+        Finds all infection events and collapse by date.
+        Label infection events numerically
+        """
 
-        ifx_events = self.labels[['h_popUID', 'date']][
-            self.labels.infection_event
-            ]
-
-        ifx_events.sort_values('date', inplace=True)
-
-        ifx_dates = ifx_events.date.unique()
-
-        if ifx_dates.size > 0:
+        def label_by_date(ifx_dates, ifx_events):
+            """
+            return numeric infection events labels by date of infections
+            """
 
             ifx_name_list = []
+
             for date, sub in ifx_events.groupby('date'):
                 ifx_name = 'ifx_event.{}'.format(
                      np.where(ifx_dates == date.to_datetime64())[0][0] + 1
@@ -387,25 +387,136 @@ class Individual(object):
                 padded_ifx_name = np.full(sub.shape[0], ifx_name)
                 ifx_name_list.append(padded_ifx_name)
 
-            ifx_events.sort_values('date', inplace=True)
+            return np.concatenate(ifx_name_list)
 
-            ifx_events['ie'] = np.concatenate(ifx_name_list)
+        # get infection events
+        ifx_events = self.labels[['h_popUID', 'date']][
+            self.labels.infection_event
+            ].\
+            sort_values('date')
 
-            self.labels = self.labels.merge(
-                ifx_events,
-                how='left',
-                ).fillna('ifx_event.0')
+        # get unique ifx dates
+        ifx_dates = ifx_events.date.unique()
 
-            for hdi, sub in ifx_events.groupby(['h_popUID', 'date', 'ie']):
-                hid, date, ie = hdi
-                self.labels.ie[
-                    (self.labels.h_popUID == hid) & (
-                        self.labels.date >= date)
-                    ] = ie
+        # if there are no infection events quit
+        if ifx_dates.size == 0:
+            self.labels['ie'] = 'ifx_events.0'
+            return
 
-        else:
-            self.labels['ie'] = 'ifx_event.0'
+        # label infection events by date
+        ifx_events['ie'] = label_by_date(ifx_dates, ifx_events)
 
+        # merge infection events with labels
+        self.labels = self.labels.merge(
+            ifx_events,
+            how='left',
+            ).fillna('ifx_event.0')
+
+        # label subsequent infection events as the same infection event
+        for hdi, sub in ifx_events.groupby(['h_popUID', 'date', 'ie']):
+            hid, date, ie = hdi
+            self.labels.ie[
+                (self.labels.h_popUID == hid) & (self.labels.date >= date)
+                ] = ie
+
+    def NestInfectionEvents(self, infection_mins):
+        """
+        Calculate skips at infection event level and nest infection events
+        that do not exceed the skip threshold (+1)
+        """
+
+        # build bool array for skips on infection events
+        date_pos_arr = np.zeros(
+            infection_mins.date_pos.max() + 1, dtype=bool
+            )
+        date_pos_arr[infection_mins.date_pos] = True
+
+        # calculate skips
+        infection_mins['date_skips'] = self.PositionalDifference(
+                date_pos_arr, 0, add_one=True
+                )
+
+        # initialize rename column
+        infection_mins['rename'] = infection_mins.h_popUID.copy()
+
+        # find where skips do not exceed skip threshold
+        to_merge = np.where(
+            infection_mins.date_skips <= self.skip_threshold
+            )[0]
+
+        # nest infection events within threshold
+        for i in to_merge:
+            if i == 0:
+                continue
+            else:
+                infection_mins['rename'].iloc[i] = \
+                    infection_mins['rename'].iloc[i-1]
+
+        # merge infection minds with labels dataframe
+        self.labels = self.labels.merge(
+            infection_mins, how='left'
+            )
+
+        # convert infection events to renamed infection events
+        self.labels['h_popUID'] = self.labels['rename']
+
+        # drop extraneous columns
+        self.labels = self.labels.drop(
+            columns=['date_pos', 'date_skips', 'rename']
+            )
+
+    def ValidateNestedInfections(self):
+        """
+        final validation and filtering for nested infection events
+        """
+
+        def remove_extraneous_infection_events():
+            """
+            zero out infection events that appear twice in the same
+            group (artifact of merging)
+            """
+            ifx_size = self.labels.\
+                groupby('h_popUID').\
+                apply(
+                    lambda x: x.infection_event.cumsum()
+                    ).values
+
+            ifx_size = ifx_size.reshape(-1)
+
+            self.labels.infection_event[
+                np.where(ifx_size > 1)[0]
+                ] = False
+
+        def drop_multiple_date_values():
+            """
+            collapses nested infection events by date so no
+            duplicated visit numbers are present
+            """
+            group = ['cohortid', 'h_popUID', 'date']
+            self.labels = self.labels.groupby(group).agg({
+                'skips': 'min',
+                'visit_number': 'min',
+                'enrolldate': 'min',
+                'burnin': 'min',
+                'gender': 'min',
+                'agecat': 'min',
+                'infection_event': 'max',
+                'active_new_infection': 'max',
+                'active_baseline_infection': 'max'
+                }).reset_index()
+
+        remove_extraneous_infection_events()
+        drop_multiple_date_values()
+
+    def CollapseInfectionEvents(self):
+        """
+        Collapses infection events that fall within the skip threshold of one
+        another.
+        """
+
+        self.LabelInfectionEvents()
+
+        # collapse duplicate ifx_event dates together
         self.labels = self.labels.\
             groupby(['cohortid', 'ie', 'date']).\
             agg({
@@ -422,71 +533,19 @@ class Individual(object):
             reset_index().\
             rename(columns={'ie': 'h_popUID'})
 
+        # group infection events to their minimum visit_number
         infection_mins = self.labels.\
             groupby('h_popUID').\
             agg({'visit_number': 'min'}).\
             reset_index().\
             rename(columns={'visit_number': 'date_pos'})
 
-        if infection_mins.shape[0] > 1:
-            date_pos_arr = np.zeros(
-                infection_mins.date_pos.max() + 1,
-                dtype=bool
-                )
+        # continue only if there is more than one infection
+        if infection_mins.shape[0] <= 1:
+            return
 
-            date_pos_arr[infection_mins.date_pos] = True
-
-            infection_mins['date_skips'] = self.PositionalDifference(
-                    date_pos_arr, 0, add_one=True
-                    )
-
-            infection_mins['rename'] = infection_mins.h_popUID.copy()
-
-            to_merge = np.where(
-                infection_mins.date_skips <= self.skip_threshold
-                )[0]
-
-            for i in to_merge:
-                if i == 0:
-                    continue
-                else:
-                    infection_mins['rename'].iloc[i] = \
-                        infection_mins['rename'].iloc[i-1]
-
-            self.labels = self.labels.merge(
-                infection_mins, how='left'
-                )
-
-            self.labels['h_popUID'] = self.labels['rename']
-
-            self.labels = self.labels.drop(
-                columns=['date_pos', 'date_skips', 'rename']
-                )
-
-            ifx_size = self.labels.\
-                groupby('h_popUID').\
-                apply(
-                    lambda x: x.infection_event.cumsum()
-                    ).values
-
-            ifx_size = ifx_size.reshape(-1)
-
-            self.labels.infection_event[
-                np.where(ifx_size > 1)[0]
-                ] = False
-
-            group = ['cohortid', 'h_popUID', 'date']
-            self.labels = self.labels.groupby(group).agg({
-                'skips': 'min',
-                'visit_number': 'min',
-                'enrolldate': 'min',
-                'burnin': 'min',
-                'gender': 'min',
-                'agecat': 'min',
-                'infection_event': 'max',
-                'active_new_infection': 'max',
-                'active_baseline_infection': 'max'
-                }).reset_index()
+        self.NestInfectionEvents(infection_mins)
+        self.ValidateNestedInfections()
 
     def ActiveInfection(self, group):
         """
@@ -738,7 +797,7 @@ class InfectionLabeler(object):
         Create Individual objects for each individual in the cohort
         """
 
-        # self.frame = self.frame[self.frame.cohortid == '3801']
+        # self.frame = self.frame[self.frame.cohortid == '3677']
 
         iter_frame = tqdm(
             self.frame.groupby('cohortid'),
