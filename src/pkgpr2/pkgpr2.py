@@ -320,9 +320,6 @@ class Individual(object):
 
         for hid in self.hids:
 
-            if hid == 'nan' and self.hids.size > 1:
-                continue
-
             hid_arr = self.timeline.loc[hid]
 
             # calculate skips
@@ -361,7 +358,7 @@ class Individual(object):
             h for h in self.HID_Skips() if h
             ])
 
-        if (~self.skip_frame.empty) & (not impute or not self.impute_missing):
+        if (not self.skip_frame.empty) & (not impute) & (self.impute_missing):
             self.skip_frame = self.skip_frame[
                 self.skip_frame.h_popUID != 'nan'
                 ]
@@ -802,7 +799,7 @@ class InfectionLabeler(object):
         Create Individual objects for each individual in the cohort
         """
 
-        # self.frame = self.frame[self.frame.cohortid == '3677']
+        # self.frame = self.frame[self.frame.cohortid == '3602']
 
         iter_frame = tqdm(
             self.frame.groupby('cohortid'),
