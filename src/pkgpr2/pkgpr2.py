@@ -475,6 +475,19 @@ class Individual(object):
                 np.where(ifx_size > 1)[0]
                 ] = False
 
+            group = ['cohortid', 'h_popUID', 'date']
+            self.labels = self.labels.groupby(group).agg({
+                'skips': 'min',
+                'visit_number': 'min',
+                'enrolldate': 'min',
+                'burnin': 'min',
+                'gender': 'min',
+                'agecat': 'min',
+                'infection_event': 'max',
+                'active_new_infection': 'max',
+                'active_baseline_infection': 'max'
+                }).reset_index()
+
     def ActiveInfection(self, group):
         """
         Label all timepoints where an infection is still active
@@ -725,7 +738,7 @@ class InfectionLabeler(object):
         Create Individual objects for each individual in the cohort
         """
 
-        # self.frame = self.frame[self.frame.cohortid == '3506']
+        # self.frame = self.frame[self.frame.cohortid == '3801']
 
         iter_frame = tqdm(
             self.frame.groupby('cohortid'),
