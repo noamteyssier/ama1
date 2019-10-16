@@ -416,6 +416,21 @@ class Individual(object):
                 (self.labels.h_popUID == hid) & (self.labels.date >= date)
                 ] = ie
 
+        # find last baseline visit number
+        baseline_final_date = self.labels[
+            (self.labels.ie == 'ifx_event.0') & (
+                self.labels.h_popUID != 'nan')
+            ].visit_number.max()
+
+        # drop nan labels for infection event 0 past the end of
+        # the imputed genotyped ie
+        self.labels = self.labels[
+            (self.labels.ie != 'ifx_event.0') | ~(
+                    (self.labels.h_popUID == 'nan') & (
+                        self.labels.visit_number > baseline_final_date)
+                )
+            ]
+
     def NestInfectionEvents(self, infection_mins):
         """
         Calculate skips at infection event level and nest infection events
@@ -799,7 +814,7 @@ class InfectionLabeler(object):
         Create Individual objects for each individual in the cohort
         """
 
-        # self.frame = self.frame[self.frame.cohortid == '3602']
+        # self.frame = self.frame[self.frame.cohortid == '3162']
 
         iter_frame = tqdm(
             self.frame.groupby('cohortid'),
