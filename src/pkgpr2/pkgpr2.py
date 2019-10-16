@@ -564,6 +564,45 @@ class Individual(object):
         self.NestInfectionEvents(infection_mins)
         self.ValidateNestedInfections()
 
+    def FillMissingDates(self):
+        """
+        Find visit numbers that were overlooked in infectio event
+        nesting and fill in missing dates from dataframe
+        """
+        to_add = []
+
+        for hid, sub in self.labels.groupby('h_popUID'):
+
+            ie_min = sub.visit_number.min()
+            ie_max = sub.visit_number.max()
+
+            values = sub.iloc[-1][sub.columns[5:]]
+
+            for i in np.arange(ie_min, ie_max):
+
+                if i not in sub.visit_number.values:
+                    date = self.dates[i]
+                    row = {
+                        'cohortid': self.cid,
+                        'h_popUID': hid,
+                        'date': date,
+                        'skips': 0,
+                        'visit_number': i,
+                        'enrolldate': values[0],
+                        'burnin': values[1],
+                        'gender': values[2],
+                        'agecat': values[3],
+                        'infection_event': values[4],
+                        'active_new_infection': values[5],
+                        'active_baseline_infection': values[6]
+                        }
+                    to_add.append(row)
+
+        for row in to_add:
+            self.labels = self.labels.append(row, ignore_index=True)
+
+        self.labels.sort_values(['h_popUID', 'date'], inplace=True)
+
     def ActiveInfection(self, group):
         """
         Label all timepoints where an infection is still active
@@ -639,6 +678,7 @@ class Individual(object):
 
             if not self.labels.empty:
                 self.CollapseInfectionEvents()
+                self.FillMissingDates()
 
         return self.labels
 
@@ -814,7 +854,7 @@ class InfectionLabeler(object):
         Create Individual objects for each individual in the cohort
         """
 
-        # self.frame = self.frame[self.frame.cohortid == '3162']
+        # self.frame = self.frame[self.frame.cohortid == '3122']
 
         iter_frame = tqdm(
             self.frame.groupby('cohortid'),
