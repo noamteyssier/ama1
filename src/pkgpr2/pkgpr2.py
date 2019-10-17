@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 import sys
 import math
 
+from numba import jit
 from tqdm import tqdm
 from scipy.optimize import minimize
 
@@ -1084,7 +1085,7 @@ class ExponentialDecay(object):
 
         mat = frame.values
 
-        cids = np.unique(mat[:,0])
+        cids = np.unique(mat[:, 0])
 
         cid_choice = np.random.choice(cids, cids.size)
 
@@ -1094,7 +1095,7 @@ class ExponentialDecay(object):
 
         return pd.DataFrame(bootstrap, columns=frame.columns)
 
-    def ClassifyInfection(self, infection):
+    def OldClassifyInfection(self, infection):
         """
         Classify an infection type by whether or not the start date of the
         infection is observed in a given period and return the duration by the
@@ -1110,6 +1111,7 @@ class ExponentialDecay(object):
             duration = None
 
         # Start and End Observed in Period
+
         elif (ifx_min >= self.study_start) & (ifx_max <= self.study_end):
             classification = 1
             duration = ifx_max - ifx_min
@@ -1141,13 +1143,74 @@ class ExponentialDecay(object):
 
     def GetInfectionDurations(self, infection_frame):
         """for each clonal infection calculate duration"""
+
+        def ClassifyInfection(ifx_min, ifx_max, study_start, study_end,
+                              minimum_duration):
+            """
+            Classify an infection type by whether or not the start date of the
+            infection is observed in a given period and return the duration by
+            the class
+            """
+
+            active = (ifx_max >= study_start) & (ifx_min <= study_end)
+            start_observed = (ifx_min >= study_start)
+            end_observed = (ifx_max <= study_end)
+
+            classification = 0
+            duration = minimum_duration
+
+            # infection not active in period
+            if ~active:
+                duration = None
+
+            # Start and End Observed in Period
+            elif start_observed & ~end_observed:
+                classification = 1
+                duration = ifx_max - ifx_min
+
+            # Unobserved Start + Observed End in Period
+            elif ~start_observed & end_observed:
+                classification = 2
+                duration = ifx_max - study_start
+
+            # Observed Start + Unobserved End in Period
+            elif start_observed & ~end_observed:
+                classification = 3
+                duration = study_end - ifx_min
+
+            # Unobserved Start + Unobserved End in Period
+            elif ~start_observed and ~end_observed:
+                classification = 4
+                duration = study_end - study_start
+
+            if duration:
+                duration = np.timedelta64(duration, 'D').astype(int)
+
+            return classification, duration
+
+        study_start = self.study_start.asm8
+        study_end = self.study_end.asm8
+        minimum_duration = self.minimum_duration.asm8
+
         durations = infection_frame.\
             groupby(['cohortid', 'h_popUID']).\
-            apply(lambda x: self.ClassifyInfection(x)).\
+            apply(
+                lambda x: ClassifyInfection(
+                    ifx_min=x.date.values.min(),
+                    ifx_max=x.date.values.max(),
+                    study_start=study_start,
+                    study_end=study_end,
+                    minimum_duration=minimum_duration
+                    )
+                ).\
             values
+
         durations = np.vstack(durations)
+
         durations = durations[durations[:, 0] != 0]
+
         l1_durations = durations[durations[:, 0] <= 2][:, 1]
+
         l2_durations = durations[durations[:, 0] > 2][:, 1]
 
         self.durations.append([l1_durations, l2_durations])
