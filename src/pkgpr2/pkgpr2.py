@@ -1059,11 +1059,10 @@ class FOI(object):
 class ExponentialDecay(object):
 
     def __init__(self, infections,
-                 left_censor='2018-01-01',
-                 right_censor='2019-04-01',
-                 minimum_duration=15,
-                 seed=None
+                 left_censor='2018-01-01', right_censor='2019-04-01',
+                 minimum_duration=15, seed=None
                  ):
+
         if seed:
             np.random.seed(seed)
 
@@ -1082,10 +1081,18 @@ class ExponentialDecay(object):
 
     def BootstrapInfections(self, frame):
         """Bootstrap on Cohortid"""
-        cids = frame.cohortid.unique()
+
+        mat = frame.values
+
+        cids = np.unique(mat[:,0])
+
         cid_choice = np.random.choice(cids, cids.size)
-        bootstrap = pd.concat([frame[frame.cohortid == c] for c in cid_choice])
-        return bootstrap
+
+        bootstrap = np.concatenate([
+            mat[mat[:, 0] == i] for i in cid_choice
+            ])
+
+        return pd.DataFrame(bootstrap, columns=frame.columns)
 
     def ClassifyInfection(self, infection):
         """
