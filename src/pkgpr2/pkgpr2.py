@@ -1060,7 +1060,7 @@ class FOI(object):
 class ExponentialDecay(object):
 
     def __init__(self, infections,
-                 left_censor='2018-01-01', right_censor='2019-04-01',
+                 left_censor='2018-01-01', right_censor='2019-01-01',
                  minimum_duration=15, seed=None
                  ):
 
@@ -1095,52 +1095,6 @@ class ExponentialDecay(object):
 
         return pd.DataFrame(bootstrap, columns=frame.columns)
 
-    def OldClassifyInfection(self, infection):
-        """
-        Classify an infection type by whether or not the start date of the
-        infection is observed in a given period and return the duration by the
-        class
-        """
-
-        ifx_min = infection.date.min()
-        ifx_max = infection.date.max()
-
-        # infection not active in period
-        if (ifx_max <= self.study_start) | (ifx_min >= self.study_end):
-            classification = 0
-            duration = None
-
-        # Start and End Observed in Period
-
-        elif (ifx_min >= self.study_start) & (ifx_max <= self.study_end):
-            classification = 1
-            duration = ifx_max - ifx_min
-
-        # Unobserved Start + Observed End in Period
-        elif (ifx_min <= self.study_start) & (ifx_max <= self.study_end):
-            classification = 2
-            duration = ifx_max - self.study_start
-
-        # Observed Start + Unobserved End in Period
-        elif (ifx_min >= self.study_start) & (ifx_max >= self.study_end):
-            classification = 3
-            duration = self.study_end - ifx_min
-
-        # Unobserved Start + Unobserved End in Period
-        elif (ifx_min <= self.study_start) & (ifx_max >= self.study_end):
-            classification = 4
-            duration = self.study_end - self.study_start
-
-        if duration == pd.to_timedelta(0):
-            duration += self.minimum_duration
-
-        if duration:
-            duration = duration.days
-
-        self.num_classes[classification] += 1
-
-        return np.array([classification, duration])
-
     def GetInfectionDurations(self, infection_frame):
         """for each clonal infection calculate duration"""
 
@@ -1152,7 +1106,7 @@ class ExponentialDecay(object):
             the class
             """
 
-            active = (ifx_max >= study_start) & (ifx_min <= study_end)
+            active = (ifx_max >= study_start) | (ifx_min <= study_end)
             start_observed = (ifx_min >= study_start)
             end_observed = (ifx_max <= study_end)
 
@@ -1160,31 +1114,31 @@ class ExponentialDecay(object):
             duration = minimum_duration
 
             # infection not active in period
-            if ~active:
-                duration = None
+            if not active:
+                duration = -1
+                return classification, duration
 
             # Start and End Observed in Period
-            elif start_observed & ~end_observed:
+            elif start_observed and not end_observed:
                 classification = 1
                 duration = ifx_max - ifx_min
 
             # Unobserved Start + Observed End in Period
-            elif ~start_observed & end_observed:
+            elif not start_observed and end_observed:
                 classification = 2
                 duration = ifx_max - study_start
 
             # Observed Start + Unobserved End in Period
-            elif start_observed & ~end_observed:
+            elif start_observed and not end_observed:
                 classification = 3
                 duration = study_end - ifx_min
 
             # Unobserved Start + Unobserved End in Period
-            elif ~start_observed and ~end_observed:
+            elif not start_observed and not end_observed:
                 classification = 4
                 duration = study_end - study_start
 
-            if duration:
-                duration = np.timedelta64(duration, 'D').astype(int)
+            duration = np.timedelta64(duration, 'D').astype(int)
 
             return classification, duration
 
@@ -1192,20 +1146,17 @@ class ExponentialDecay(object):
         study_end = self.study_end.asm8
         minimum_duration = self.minimum_duration.asm8
 
-        durations = infection_frame.\
+        infection_minimums = infection_frame.\
             groupby(['cohortid', 'h_popUID']).\
-            apply(
-                lambda x: ClassifyInfection(
-                    ifx_min=x.date.values.min(),
-                    ifx_max=x.date.values.max(),
-                    study_start=study_start,
-                    study_end=study_end,
-                    minimum_duration=minimum_duration
-                    )
-                ).\
-            values
+            apply(lambda x: (x.date.values.min(), x.date.values.max()))
 
-        durations = np.vstack(durations)
+        durations = infection_minimums.apply(
+            lambda x: ClassifyInfection(
+                x[0], x[1], study_start, study_end, minimum_duration
+                )
+            )
+
+        durations = np.vstack(durations.values)
 
         durations = durations[durations[:, 0] != 0]
 
@@ -1214,20 +1165,8 @@ class ExponentialDecay(object):
         l2_durations = durations[durations[:, 0] > 2][:, 1]
 
         self.durations.append([l1_durations, l2_durations])
+
         return l1_durations, l2_durations
-
-    def RunDecayFunction(self, lam, l1_durations, l2_durations):
-        """
-        Exponential Decay Function as Log Likelihood
-        """
-
-        l1_llk = (np.log(lam) - (lam * l1_durations)).sum()
-
-        l2_llk = ((-1 * lam) * l2_durations).sum()
-
-        llk = l1_llk + l2_llk
-
-        return -1 * llk
 
     def GetConfidenceIntervals(self, min=5, max=95):
         """
@@ -1240,6 +1179,20 @@ class ExponentialDecay(object):
         """
         Fit Exponential Model
         """
+
+        def decay_function(lam, l1_durations, l2_durations):
+            """
+            Exponential Decay Function as Log Likelihood
+            """
+
+            l1_llk = np.log(lam) - (lam * l1_durations)
+
+            l2_llk = (-1 * lam) * l2_durations
+
+            llk = l1_llk.sum() + l2_llk.sum()
+
+            return -1 * llk
+
         if not isinstance(frame, pd.core.frame.DataFrame):
             frame = self.infections.copy()
         if bootstrap:
@@ -1254,7 +1207,7 @@ class ExponentialDecay(object):
 
         # run minimization of negative log likelihood
         opt = minimize(
-            self.RunDecayFunction,
+            decay_function,
             lam,
             args=(l1_durations, l2_durations),
             method='L-BFGS-B',
