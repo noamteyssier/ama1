@@ -1075,7 +1075,7 @@ class ExponentialDecay(object):
 
     def __init__(self, infections,
                  left_censor='2018-01-01', right_censor='2019-04-01',
-                 minimum_duration=15, seed=None, skips=3
+                 minimum_duration=30, seed=None, skips=3
                  ):
 
         if seed:
@@ -1170,7 +1170,7 @@ class ExponentialDecay(object):
             the class
             """
 
-            active = (ifx_max >= study_start) | (ifx_min <= study_end)
+            active = (ifx_max >= study_start) & (ifx_min <= study_end)
             start_observed = (ifx_min >= study_start)
             end_observed = (ifx_max <= study_censor)
 
@@ -1234,11 +1234,14 @@ class ExponentialDecay(object):
 
         durations = np.vstack(durations.values)
 
+        # print(durations.shape)
+        # sys.exit(durations)
+
         self.AddClassifications(durations[:, 0])
 
         l1_durations, l2_durations = self.SplitLikelihoods(durations)
 
-        return l1_durations, l2_durations
+        return l1_durations, l2_durations, durations
 
     def GetConfidenceIntervals(self, min=5, max=95):
         """
@@ -1274,7 +1277,7 @@ class ExponentialDecay(object):
                 ]
 
         # generate durations and initial guess
-        l1_durations, l2_durations = self.GetInfectionDurations(frame)
+        l1_durations, l2_durations, durations = self.GetInfectionDurations(frame)
         lam = np.random.random()
 
         # run minimization of negative log likelihood

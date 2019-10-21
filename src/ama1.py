@@ -82,7 +82,7 @@ def DecayByGroup(infections, n_iter=200, group=['gender'], label=None):
         ed = ExponentialDecay(frame)
         l, bsl = ed.fit(bootstrap=True, n_iter=n_iter)
         print(index)
-        print(ed.num_classes)
+        print(ed.num_classes / ed.num_classes.sum())
 
         indices.append(index)
         ed_classes.append(ed)
@@ -119,21 +119,64 @@ def dev_Survival():
     w.plot()
 
 
+def durations_by_cat(sub_labels, label='label'):
+    e = ExponentialDecay(sub_labels, seed=42)
+    l1, l2, durations = e.GetInfectionDurations(sub_labels)
+
+    frame = pd.DataFrame(durations, columns=['classification', 'duration'])
+    frame = frame[frame.classification != 0]
+
+    d = {
+        1: 'uncensored',
+        2: 'c_left',
+        3: 'c_right',
+        4: 'c_both'
+        }
+
+    frame['classification'] = [d[i] for i in frame.classification]
+    frame['label'] = label
+
+    return frame
+
+
+def plot_durations_by_baseline(labels):
+    """
+    Plot durations by baseline condition for a given label set
+    """
+    baseline = durations_by_cat(
+        labels[labels.active_baseline_infection],
+        label='baseline'
+        )
+
+    newifx = durations_by_cat(
+        labels[~labels.active_baseline_infection],
+        label='newifx'
+        )
+    durations = pd.concat([baseline, newifx])
+
+    print(
+        durations.groupby(['classification', 'label']).apply(lambda x: x.size)
+        )
+
+    durations.sort_values('classification', inplace=True, ascending=False)
+
+    sns.violinplot(
+        data=durations,
+        x='classification',
+        y='duration',
+        cut=0, hue='label'
+        )
+
+    plt.show()
+
 def dev_Durations():
     sdo, meta = load_inputs()
-    labels = load_labels(clone=False)
+    labels = load_labels(clone=True)
 
+    plot_durations_by_baseline(labels)
 
     # e = ExponentialDecay(labels, seed=42)
-    # e.fit(bootstrap=True, n_iter=200)
-    # e.plot()
-
-    num_visits = labels.groupby(['cohortid', 'h_popUID']).apply(lambda x : x.shape[0] > 1).reset_index()
-    labels = labels.merge(num_visits, how='left')
-    labels = labels[labels[0]].drop(columns=0)
-    # print(labels)
-    # sns.distplot(num_visits)
-    # plt.show()
+    # l1, l2, durations = e.GetInfectionDurations(labels)
 
     # sys.exit()
     DecayByGroup(
