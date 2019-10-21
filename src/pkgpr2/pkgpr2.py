@@ -1060,8 +1060,8 @@ class FOI(object):
 class ExponentialDecay(object):
 
     def __init__(self, infections,
-                 left_censor='2018-01-01', right_censor='2019-01-01',
-                 minimum_duration=15, seed=None
+                 left_censor='2018-01-01', right_censor='2019-04-01',
+                 minimum_duration=15, seed=None, skips=3
                  ):
 
         if seed:
@@ -1072,6 +1072,9 @@ class ExponentialDecay(object):
             else infections.date.min()
         self.study_end = pd.to_datetime(right_censor) if right_censor \
             else infections.date.max()
+        self.study_censor = self.study_end - pd.Timedelta(
+                '{} Days'.format(skips * 28)
+                )
         self.minimum_duration = pd.Timedelta(
             '{} Days'.format(minimum_duration)
             )
@@ -1099,7 +1102,7 @@ class ExponentialDecay(object):
         """for each clonal infection calculate duration"""
 
         def ClassifyInfection(ifx_min, ifx_max, study_start, study_end,
-                              minimum_duration):
+                              study_censor, minimum_duration):
             """
             Classify an infection type by whether or not the start date of the
             infection is observed in a given period and return the duration by
@@ -1108,7 +1111,7 @@ class ExponentialDecay(object):
 
             active = (ifx_max >= study_start) | (ifx_min <= study_end)
             start_observed = (ifx_min >= study_start)
-            end_observed = (ifx_max <= study_end)
+            end_observed = (ifx_max <= study_censor)
 
             classification = 0
             duration = minimum_duration
@@ -1131,12 +1134,18 @@ class ExponentialDecay(object):
             # Observed Start + Unobserved End in Period
             elif start_observed and not end_observed:
                 classification = 3
-                duration = study_end - ifx_min
+                if ifx_max < study_end:
+                    duration = ifx_max - ifx_min
+                else:
+                    duration = study_end - ifx_min
 
             # Unobserved Start + Unobserved End in Period
             elif not start_observed and not end_observed:
                 classification = 4
-                duration = study_end - study_start
+                if ifx_max < study_end:
+                    duration = ifx_max - study_start
+                else:
+                    duration = study_end - study_start
 
             duration = np.timedelta64(duration, 'D').astype(int)
 
@@ -1144,6 +1153,7 @@ class ExponentialDecay(object):
 
         study_start = self.study_start.asm8
         study_end = self.study_end.asm8
+        study_censor = self.study_censor.asm8
         minimum_duration = self.minimum_duration.asm8
 
         infection_minimums = infection_frame.\
@@ -1152,7 +1162,8 @@ class ExponentialDecay(object):
 
         durations = infection_minimums.apply(
             lambda x: ClassifyInfection(
-                x[0], x[1], study_start, study_end, minimum_duration
+                x[0], x[1], study_start, study_end,
+                study_censor, minimum_duration
                 )
             )
 
