@@ -48,7 +48,10 @@ def dev_infectionLabeler():
 
     # labels_a = il.LabelInfections(by_clone=True)
     labels_b = il.LabelInfections(by_clone=False)
-    sys.exit(labels_b)
+
+    labels_b.to_csv('labels.ifx.tab', sep="\t", index=False)
+
+    sys.exit()
 
 
     labels_a.infection_event.sum()
@@ -78,6 +81,8 @@ def DecayByGroup(infections, n_iter=200, group=['gender'], label=None):
     for index, frame in infections.groupby(group):
         ed = ExponentialDecay(frame)
         l, bsl = ed.fit(bootstrap=True, n_iter=n_iter)
+        print(index)
+        print(ed.num_classes)
 
         indices.append(index)
         ed_classes.append(ed)
@@ -98,32 +103,49 @@ def dev_Survival():
     sdo, meta = load_inputs()
     labels = load_labels(clone=True)
 
-    # fon = FractionOldNew(
-    #     infections=labels, meta=meta, burnin=2, bootstrap=False, n_iter=5)
-    # fon.fit()
-    # fon.plot()
-    #
-    # ons = OldNewSurival(
-    #     infections=labels, meta=meta, burnin=2, bootstrap=False, n_iter=5)
-    # ons.fit()
-    # ons.plot()
-    #
-    # w = OldWaning(
-    #     infections=labels, meta=meta, burnin=2, bootstrap=True, n_iter=5)
-    # w.fit()
-    # w.plot()
+    fon = FractionOldNew(
+        infections=labels, meta=meta, burnin=2, bootstrap=False, n_iter=5)
+    fon.fit()
+    fon.plot()
+
+    ons = OldNewSurival(
+        infections=labels, meta=meta, burnin=2, bootstrap=False, n_iter=5)
+    ons.fit()
+    ons.plot()
+
+    w = OldWaning(
+        infections=labels, meta=meta, burnin=2, bootstrap=True, n_iter=5)
+    w.fit()
+    w.plot()
+
+
+def dev_Durations():
+    sdo, meta = load_inputs()
+    labels = load_labels(clone=False)
+
 
     # e = ExponentialDecay(labels, seed=42)
     # e.fit(bootstrap=True, n_iter=200)
     # e.plot()
-    #
+
+    num_visits = labels.groupby(['cohortid', 'h_popUID']).apply(lambda x : x.shape[0] > 1).reset_index()
+    labels = labels.merge(num_visits, how='left')
+    labels = labels[labels[0]].drop(columns=0)
+    # print(labels)
+    # sns.distplot(num_visits)
+    # plt.show()
+
     # sys.exit()
-    DecayByGroup(labels, group='gender', n_iter=500)
+    DecayByGroup(
+        labels, n_iter=500,
+        group=['active_baseline_infection']#, 'agecat']
+        )
 
 
 if __name__ == '__main__':
     # dev_infectionLabeler()
-    dev_Survival()
+    # dev_Survival()
+    dev_Durations()
     # dev_FOI()
     # dev_BootstrapLabels()
     # multiprocess_FOI()

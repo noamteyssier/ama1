@@ -872,6 +872,19 @@ class InfectionLabeler(object):
                 )
             self.cohort.append(t)
 
+    def AddMeta(self):
+        """
+        Add cohortid meta data to labels dataframe
+        """
+
+        # adds malaria category
+        self.labels = self.labels.merge(
+            self.meta[['cohortid', 'date', 'malariacat']],
+            how='left',
+            left_on=['cohortid', 'date'],
+            right_on=['cohortid', 'date']
+            )
+
     def LabelInfections(self, by_clone=True):
         """
         Label infections for all individuals in the cohort
@@ -892,6 +905,7 @@ class InfectionLabeler(object):
             c.LabelInfections(by_clone=by_clone) for c in iter_cohort
             ])
 
+        self.AddMeta()
         return self.labels
 
 
@@ -1083,6 +1097,25 @@ class ExponentialDecay(object):
         self.num_classes = np.zeros(5)
         self.optimizers = []
 
+        self.DropMalaria()
+
+    def DropMalaria(self):
+        """
+        Drop any infections with a malaria event
+        """
+
+        to_drop = self.infections.\
+            groupby(['cohortid', 'h_popUID']).\
+            apply(
+                lambda x: np.any(x.malariacat == 'Malaria')
+                ).reset_index()
+
+        self.infections = self.infections.\
+            merge(to_drop, how='left')
+
+        self.infections = self.infections[~self.infections[0]].\
+            drop(columns=0)
+
     def BootstrapInfections(self, frame):
         """Bootstrap on Cohortid"""
 
@@ -1097,6 +1130,34 @@ class ExponentialDecay(object):
             ])
 
         return pd.DataFrame(bootstrap, columns=frame.columns)
+
+    def AddClassifications(self, class_vec):
+        """
+        Add number of observations of each classification
+        """
+
+        classification, counts = np.unique(
+            class_vec, return_counts=True
+            )
+
+        for i, j in enumerate(classification):
+            self.num_classes[j] += counts[i]
+
+    def SplitLikelihoods(self, durations):
+        """
+        Split durations into different arrays for vectorized liklihood
+        calculations
+        """
+
+        durations = durations[durations[:, 0] != 0]
+
+        l1_durations = durations[durations[:, 0] <= 2][:, 1]
+
+        l2_durations = durations[durations[:, 0] > 2][:, 1]
+
+        self.durations.append([l1_durations, l2_durations])
+
+        return l1_durations, l2_durations
 
     def GetInfectionDurations(self, infection_frame):
         """for each clonal infection calculate duration"""
@@ -1122,7 +1183,7 @@ class ExponentialDecay(object):
                 return classification, duration
 
             # Start and End Observed in Period
-            elif start_observed and not end_observed:
+            elif start_observed and end_observed:
                 classification = 1
                 duration = ifx_max - ifx_min
 
@@ -1151,31 +1212,31 @@ class ExponentialDecay(object):
 
             return classification, duration
 
-        study_start = self.study_start.asm8
         study_end = self.study_end.asm8
         study_censor = self.study_censor.asm8
         minimum_duration = self.minimum_duration.asm8
 
         infection_minimums = infection_frame.\
             groupby(['cohortid', 'h_popUID']).\
-            apply(lambda x: (x.date.values.min(), x.date.values.max()))
+            apply(lambda x: (
+                x.date.values.min(),
+                x.date.values.max(),
+                x.burnin.values.min()
+                )
+            )
 
         durations = infection_minimums.apply(
             lambda x: ClassifyInfection(
-                x[0], x[1], study_start, study_end,
+                x[0], x[1], x[2], study_end,
                 study_censor, minimum_duration
                 )
             )
 
         durations = np.vstack(durations.values)
 
-        durations = durations[durations[:, 0] != 0]
+        self.AddClassifications(durations[:, 0])
 
-        l1_durations = durations[durations[:, 0] <= 2][:, 1]
-
-        l2_durations = durations[durations[:, 0] > 2][:, 1]
-
-        self.durations.append([l1_durations, l2_durations])
+        l1_durations, l2_durations = self.SplitLikelihoods(durations)
 
         return l1_durations, l2_durations
 
