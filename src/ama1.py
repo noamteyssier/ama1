@@ -51,26 +51,13 @@ def dev_infectionLabeler():
 
     labels_b.to_csv('labels.ifx.tab', sep="\t", index=False)
 
-    sys.exit()
-
-
-    labels_a.infection_event.sum()
-    labels_b[labels_b.date < pd.to_datetime('2019-04-01')].infection_event.sum()
-
-    labels_a.groupby('cohortid').apply(lambda x : x.infection_event.sum()).reset_index().to_csv(sys.stdout, sep="\t")
-    labels_b.groupby('cohortid').apply(lambda x : x.infection_event.sum()).reset_index().to_csv(sys.stdout, sep="\t")
-
 
 def dev_FOI():
     sdo, meta = load_inputs()
     labels = InfectionLabeler(sdo, meta)
 
-
     foi = FOI(labels, meta, burnin=2)
-
-    full = foi.fit(group = ['year_month'])
-    labels.infection_event
-    labels[labels.date <= pd.to_datetime('2019-04-01')].infection_event.sum()
+    print(foi)
 
 
 def DecayByGroup(infections, n_iter=200, group=['gender'], label=None):
@@ -90,9 +77,14 @@ def DecayByGroup(infections, n_iter=200, group=['gender'], label=None):
         bootstrapped_values.append(bsl)
 
     for i, _ in enumerate(ed_classes):
-        sns.distplot(1 /bootstrapped_values[i], bins=30)
-        plt.axvline(1/ estimated_values[i], label=indices[i], color=sns.color_palette()[i], linestyle=':', lw=5)
-        plt.legend(labels = indices)
+        sns.distplot(1 / bootstrapped_values[i], bins=30)
+        plt.axvline(
+            1 / estimated_values[i],
+            label=indices[i],
+            color=sns.color_palette()[i],
+            linestyle=':', lw=5
+            )
+        plt.legend(labels=indices)
 
     if label:
         plt.savefig('../plots/durations/{}.png'.format(label))
@@ -169,6 +161,7 @@ def plot_durations_by_baseline(labels):
 
     plt.show()
 
+
 def dev_Durations():
     sdo, meta = load_inputs()
     labels = load_labels(clone=True)
@@ -181,7 +174,7 @@ def dev_Durations():
     # sys.exit()
     DecayByGroup(
         labels, n_iter=500,
-        group=['active_baseline_infection']#, 'agecat']
+        group=['active_baseline_infection']
         )
 
 
