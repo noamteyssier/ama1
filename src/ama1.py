@@ -18,9 +18,24 @@ def load_inputs():
     sdo = pd.read_csv(
         '../prism2/full_prism2/final_filter.tab', sep="\t")
     meta = pd.read_csv(
-        '../prism2/stata/full_meta_grant_version.tab', sep="\t",
+        '../prism2/stata/full_meta_6mo.tab', sep="\t",
         low_memory=False)
     return sdo, meta
+
+
+def load_labels(clone=True):
+    fn = "labels.{}.tab"
+    if clone:
+        fn = fn.format('clone')
+    else:
+        fn = fn.format('ifx')
+
+    labels = pd.read_csv(fn, sep="\t")
+    labels.date = labels.date.astype('datetime64')
+    labels.enrolldate = labels.enrolldate.astype('datetime64')
+    labels.burnin = labels.burnin.astype('datetime64')
+
+    return labels
 
 
 def dev_infectionLabeler():
@@ -55,7 +70,7 @@ def dev_FOI():
     labels[labels.date <= pd.to_datetime('2019-04-01')].infection_event.sum()
 
 
-def DecayByGroup(infections, n_iter=100, group=['gender'], label=None):
+def DecayByGroup(infections, n_iter=200, group=['gender'], label=None):
     ed_classes = []
     estimated_values = []
     bootstrapped_values = []
@@ -81,11 +96,7 @@ def DecayByGroup(infections, n_iter=100, group=['gender'], label=None):
 
 def dev_Survival():
     sdo, meta = load_inputs()
-
-    il = InfectionLabeler(
-        sdo, meta,
-        burnin=2, qpcr_threshold=0)
-    labels = il.LabelInfections(by_clone=True)
+    labels = load_labels(clone=True)
 
     # fon = FractionOldNew(
     #     infections=labels, meta=meta, burnin=2, bootstrap=False, n_iter=5)
@@ -102,16 +113,17 @@ def dev_Survival():
     # w.fit()
     # w.plot()
 
-    e = ExponentialDecay(infections=labels[labels.date <= pd.to_datetime('2019-04-01')])
-    e.fit(bootstrap=True)
-    e.plot()
-
-    # DecayByGroup(labels, group='agecat')
+    # e = ExponentialDecay(labels, seed=42)
+    # e.fit(bootstrap=True, n_iter=200)
+    # e.plot()
+    #
+    # sys.exit()
+    DecayByGroup(labels, group='gender', n_iter=500)
 
 
 if __name__ == '__main__':
-    dev_infectionLabeler()
-    # dev_Survival()
+    # dev_infectionLabeler()
+    dev_Survival()
     # dev_FOI()
     # dev_BootstrapLabels()
     # multiprocess_FOI()
