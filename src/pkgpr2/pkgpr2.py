@@ -170,7 +170,7 @@ class Individual(object):
             else:
                 # disregard pre-burnin skips
                 if (truth[i - 1] < position) & (pos >= position):
-                    skips = pos - math.ceil(position)
+                    skips = pos - truth[i-1] - 1
 
                 # calculate skips in pre-burnin period
                 else:
@@ -648,7 +648,7 @@ class Individual(object):
             return True
 
         # if infection is never seen before and after burnin then true
-        elif row.skips == row.visit_number:
+        elif row.hid_visit_number == 1 and row.date > row.burnin:
             return True
 
         else:
@@ -666,6 +666,11 @@ class Individual(object):
                     self.frame[merge_cols].iloc[:1],
                     how='left'
                     )
+
+                self.labels['hid_visit_number'] = self.labels.\
+                    groupby(['h_popUID']).\
+                    apply(lambda x: x.visit_number.rank()).\
+                    values.ravel().astype(int)
 
                 self.labels['infection_event'] = self.labels.apply(
                     lambda x: self.getLabel(x),
@@ -855,7 +860,7 @@ class InfectionLabeler(object):
         Create Individual objects for each individual in the cohort
         """
 
-        # self.frame = self.frame[self.frame.cohortid == '3122']
+        # self.frame = self.frame[self.frame.cohortid == '3147']
 
         iter_frame = tqdm(
             self.frame.groupby('cohortid'),
@@ -1277,14 +1282,14 @@ class ExponentialDecay(object):
                 ]
 
         # generate durations and initial guess
-        l1_durations, l2_durations, durations = self.GetInfectionDurations(frame)
+        l1_d, l2_d, durations = self.GetInfectionDurations(frame)
         lam = np.random.random()
 
         # run minimization of negative log likelihood
         opt = minimize(
             decay_function,
             lam,
-            args=(l1_durations, l2_durations),
+            args=(l1_d, l2_d),
             method='L-BFGS-B',
             bounds=((1e-6, None), )
             )
