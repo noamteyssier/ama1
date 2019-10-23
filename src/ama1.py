@@ -46,10 +46,10 @@ def dev_infectionLabeler():
         qpcr_threshold=0, burnin=2
         )
 
-    # labels_a = il.LabelInfections(by_clone=True)
-    labels_b = il.LabelInfections(by_clone=False)
-
-    labels_b.to_csv('labels.ifx.tab', sep="\t", index=False)
+    labels = il.LabelInfections(by_clone=False)
+    sys.exit(labels)
+    # print(labels_a)
+    labels.to_csv('labels.idx.tab', sep="\t", index=False)
 
 
 def dev_FOI():
@@ -96,9 +96,13 @@ def dev_Survival():
     labels = load_labels(clone=True)
 
     fon = FractionOldNew(
-        infections=labels, meta=meta, burnin=2, bootstrap=False, n_iter=5)
+        infections=labels, meta=meta,
+        burnin=2, bootstrap=True, n_iter=100
+        )
     fon.fit()
     fon.plot()
+
+    sys.exit()
 
     ons = OldNewSurival(
         infections=labels, meta=meta, burnin=2, bootstrap=False, n_iter=5)
@@ -166,12 +170,12 @@ def dev_Durations():
     sdo, meta = load_inputs()
     labels = load_labels(clone=True)
 
-    plot_durations_by_baseline(labels)
+    plot_durations_by_baseline(labels[labels.gender == 'Female'])
 
     # e = ExponentialDecay(labels, seed=42)
     # l1, l2, durations = e.GetInfectionDurations(labels)
 
-    # sys.exit()
+    sys.exit()
     DecayByGroup(
         labels, n_iter=500,
         group=['active_baseline_infection']
@@ -180,8 +184,8 @@ def dev_Durations():
 
 if __name__ == '__main__':
     # dev_infectionLabeler()
-    # dev_Survival()
-    dev_Durations()
+    dev_Survival()
+    # dev_Durations()
     # dev_FOI()
     # dev_BootstrapLabels()
     # multiprocess_FOI()

@@ -1468,7 +1468,7 @@ class FractionOldNew(Survival):
             groupby('year_month').\
             apply(lambda x: x/x.sum())
 
-        return ym_frame
+        return ym_frame[ym_frame.active_new_infection]
 
     def RunBootstraps(self):
         """
@@ -1529,6 +1529,8 @@ class FractionOldNew(Survival):
                 x='year_month',
                 y='pc',
                 hue='active_new_infection')
+
+        plt.ylim(0, 1)
 
         plt.xlabel('Date')
         plt.ylabel('Percentage')
