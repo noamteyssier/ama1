@@ -446,7 +446,7 @@ class Individual(object):
 
         # calculate skips
         infection_mins['date_skips'] = self.PositionalDifference(
-                date_pos_arr, 0, add_one=True
+                date_pos_arr, 0, add_one=False
                 )
 
         # initialize rename column
@@ -947,7 +947,7 @@ class FOI(object):
 
         merge_columns = [
             'cohortid', 'date', 'enrolldate',
-            'burnin', 'gender', 'agecat'
+            'burnin', 'gender', 'agecat', 'malariacat'
             ]
 
         self.frame = self.meta.merge(
@@ -956,6 +956,14 @@ class FOI(object):
                 right_on=merge_columns,
                 how='left'
                 )
+        print(self.frame)
+        wat = self.frame.\
+            groupby('cohortid').\
+            agg({'agecat': lambda x : np.unique(x).size})
+
+        print((wat>1).sum())
+
+        sys.exit()
 
     def AddBurnin(self):
         """
@@ -985,7 +993,7 @@ class FOI(object):
         return durations across a group or a singular value
         for the full dataset
         """
-        # if type(working_frame) == type(None):
+
         if not isinstance(working_frame, pd.core.frame.DataFrame):
             working_frame = self.frame.copy()
 
@@ -1009,6 +1017,7 @@ class FOI(object):
         return number of infections across a group
         or a singular value for the full dataset
         """
+
         if not isinstance(working_frame, pd.core.frame.DataFrame):
             working_frame = self.frame.copy()
 
@@ -1030,6 +1039,7 @@ class FOI(object):
         return number of exposed individuals across a group
         or a singular value for the full dataset
         """
+
         if not isinstance(working_frame, pd.core.frame.DataFrame):
             working_frame = self.frame.copy()
 
@@ -1054,6 +1064,8 @@ class FOI(object):
         durations = self.getDurations(group=group)
         events = self.getInfections(group=group)
         exposure = self.getExposure(group=group)
+
+        sys.exit()
 
         foi = events / (exposure * durations)
 
