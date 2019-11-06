@@ -3,12 +3,12 @@
 import numpy as np
 import pandas as pd
 import numba as nb
-import sys
-from tqdm import tqdm
-
 import seaborn as sns
 import matplotlib.pyplot as plt
+import sys
 
+from tqdm import tqdm
+from multiprocess import Pool
 from scipy.optimize import minimize
 
 
@@ -25,6 +25,35 @@ def decay_function(lam, l1_durations, l2_durations):
     llk = l1_llk.sum() + l2_llk.sum()
 
     return -1 * llk
+
+
+@nb.jit(nopython=True)
+def sample_cohortid(cids):
+    return np.random.choice(cids, cids.size)
+
+
+@nb.jit(nopython=True)
+def generate_indices(original_cids, sampled_cids):
+    arr = []
+    for i in np.arange(sampled_cids.size):
+        cid = sampled_cids[i]
+        for j in np.where(original_cids == cid)[0]:
+            arr.append(j)
+
+    return np.array(arr)
+
+
+def bootstrap_frame(frame, num_iter):
+    original_cids = frame.iloc[:, 0].values
+    unique_cids = np.unique(original_cids)
+
+    for i in range(num_iter):
+        sampled_cids = sample_cohortid(unique_cids)
+
+        cid_indices = generate_indices(original_cids, sampled_cids)
+
+        yield frame.iloc[cid_indices]
+
 
 
 class ExponentialDecay(object):
@@ -214,10 +243,11 @@ class ExponentialDecay(object):
         if not isinstance(frame, pd.core.frame.DataFrame):
             frame = self.infections.copy()
         if bootstrap:
-            bootstrapped_lams = [
-                self.fit(frame=self.BootstrapInfections(frame))
-                for _ in tqdm(range(n_iter))
-                ]
+            p = Pool()
+            bootstrapped_lams = p.map(self.fit, bootstrap_frame(frame, n_iter))
+            # bootstrapped_lams = [
+            #     self.fit(b) for b in bootstrap_frame(frame, n_iter)
+            #     ]
 
         # generate durations and initial guess
         l1_d, l2_d, durations = self.GetInfectionDurations(frame)
