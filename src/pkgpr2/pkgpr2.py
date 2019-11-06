@@ -446,7 +446,7 @@ class Individual(object):
 
         # calculate skips
         infection_mins['date_skips'] = self.PositionalDifference(
-                date_pos_arr, 0, add_one=False
+                date_pos_arr, 0, add_one=True
                 )
 
         # initialize rename column
