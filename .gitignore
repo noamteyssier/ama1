@@ -1,3 +1,4 @@
 *.pyo
 *.pyc
 src/*.tab
+src/.Rhistory
