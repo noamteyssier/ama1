@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 import sys
 import math
 
+from multiprocess import Pool
 from numba import jit
 from tqdm import tqdm
 from scipy.optimize import minimize
@@ -63,6 +64,8 @@ class Individual(object):
         self.timeline = pd.DataFrame()
         self.skip_frame = pd.DataFrame()
         self.labels = pd.DataFrame()
+
+        self.rename_dict = {}
 
         self.QpcrTimeline()
         self.PostBurnin()
@@ -433,6 +436,62 @@ class Individual(object):
             ]
 
     def NestInfectionEvents(self, infection_mins):
+        """
+        Recursive implementation of nesting infection events
+
+        Calculate skips
+        If collapse necessary
+            collapse
+            recurse
+        Apply changes
+
+        Parameters
+        ----------
+        infection_mins : pd.DataFrame
+            Dataframe of infection events and date positions
+
+        """
+        def apply_rename(x):
+            if x.h_popUID in self.rename_dict:
+                return self.rename_dict[x.h_popUID]
+            else:
+                return x.h_popUID
+
+        date_pos_arr = np.zeros(
+            infection_mins.date_pos.max() + 1, dtype=bool
+            )
+        date_pos_arr[infection_mins.date_pos] = True
+
+        # calculate skips
+        skips = self.PositionalDifference(
+                date_pos_arr, 0, add_one=True
+                )
+
+        # find where skips do not exceed skip threshold
+        to_merge = np.where(
+            skips <= self.skip_threshold
+            )[0]
+
+        to_merge = to_merge[to_merge != 0]
+
+        if to_merge.size > 0:
+            merge_from = infection_mins.iloc[to_merge[0]].h_popUID
+            merge_to = infection_mins.iloc[to_merge[0] - 1].h_popUID
+
+            self.rename_dict[merge_from] = merge_to
+
+            # drop infection event from infection mins and reset index
+            infection_mins = infection_mins.drop(to_merge[0]).\
+                reset_index()
+            infection_mins = infection_mins.iloc[:, 1:]
+
+            self.NestInfectionEvents(infection_mins)
+
+        self.labels['h_popUID'] = self.labels.apply(
+            lambda x: apply_rename(x), axis=1
+            )
+
+    def oldNestInfectionEvents(self, infection_mins):
         """
         Calculate skips at infection event level and nest infection events
         that do not exceed the skip threshold (+1)
@@ -860,7 +919,7 @@ class InfectionLabeler(object):
         Create Individual objects for each individual in the cohort
         """
 
-        # self.frame = self.frame[self.frame.cohortid == '3147']
+        # self.frame = self.frame[self.frame.cohortid == '3801']
 
         iter_frame = tqdm(
             self.frame.groupby('cohortid'),
@@ -900,15 +959,22 @@ class InfectionLabeler(object):
             Returns concatenated labels for all infections in the cohort
 
         """
+        def pooled_run(cid):
+            return cid.LabelInfections(by_clone=by_clone)
 
         iter_cohort = tqdm(
             self.cohort,
             desc='labeling infections'
             )
 
-        self.labels = pd.concat([
-            c.LabelInfections(by_clone=by_clone) for c in iter_cohort
-            ])
+        p = Pool()
+        self.labels = pd.concat(
+            p.map(pooled_run, iter_cohort)
+            )
+
+        # self.labels = pd.concat([
+        #     c.LabelInfections(by_clone=by_clone) for c in iter_cohort
+        #     ])
 
         self.AddMeta()
         return self.labels
@@ -956,14 +1022,6 @@ class FOI(object):
                 right_on=merge_columns,
                 how='left'
                 )
-        print(self.frame)
-        wat = self.frame.\
-            groupby('cohortid').\
-            agg({'agecat': lambda x : np.unique(x).size})
-
-        print((wat>1).sum())
-
-        sys.exit()
 
     def AddBurnin(self):
         """
