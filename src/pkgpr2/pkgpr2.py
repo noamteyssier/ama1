@@ -467,6 +467,8 @@ class Individual(object):
                 date_pos_arr, 0, add_one=True
                 )
 
+        skips = skips + 1
+
         # find where skips do not exceed skip threshold
         to_merge = np.where(
             skips <= self.skip_threshold
@@ -919,7 +921,7 @@ class InfectionLabeler(object):
         Create Individual objects for each individual in the cohort
         """
 
-        # self.frame = self.frame[self.frame.cohortid == '3801']
+        # self.frame = self.frame[self.frame.cohortid == '3602']
 
         iter_frame = tqdm(
             self.frame.groupby('cohortid'),
@@ -971,10 +973,6 @@ class InfectionLabeler(object):
         self.labels = pd.concat(
             p.map(pooled_run, iter_cohort)
             )
-
-        # self.labels = pd.concat([
-        #     c.LabelInfections(by_clone=by_clone) for c in iter_cohort
-        #     ])
 
         self.AddMeta()
         return self.labels
