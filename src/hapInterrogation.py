@@ -25,7 +25,7 @@ def get_args():
     # meta
     p.add_argument(
         '-m', '--meta', required=False,
-        default="../prism2/stata/full_meta_6mo_fu.tab",
+        default="../prism2/stata/full_meta_6mo.tab",
         help="Cohort Meta information (tsv) to relate cohortids")
 
     # label flag
@@ -260,7 +260,8 @@ def survival(sdo, meta, args):
 
     known_methods = ['fraction_oldnew', 'survival_oldnewmix', 'waning_old']
     if args.survival not in known_methods:
-        sys.exit('Error : choose a method from :', known_methods)
+        print('Error : choose a method from :', known_methods)
+        sys.exit()
 
     labels = label_infections(sdo, meta, args)
 

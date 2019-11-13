@@ -1602,7 +1602,7 @@ class FractionOldNew(Survival):
 
         plt.xlabel('Date')
         plt.ylabel('Percentage')
-        plt.title('Fraction of Old Clones In Infected Population')
+        plt.title('Fraction of New Clones In Infected Population')
         plt.show()
         plt.close()
 
