@@ -47,9 +47,9 @@ def dev_infectionLabeler():
         )
 
     labels = il.LabelInfections(by_clone=False)
-    sys.exit(labels)
+    # sys.exit(labels)
     # print(labels_a)
-    labels.to_csv('labels.idx.tab', sep="\t", index=False)
+    labels.to_csv('labels.ifx.tab', sep="\t", index=False)
 
 
 def dev_FOI():
@@ -183,8 +183,8 @@ def dev_Durations():
 
 
 if __name__ == '__main__':
-    # dev_infectionLabeler()
-    dev_Survival()
+    dev_infectionLabeler()
+    # dev_Survival()
     # dev_Durations()
     # dev_FOI()
     # dev_BootstrapLabels()

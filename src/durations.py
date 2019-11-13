@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 
+import numpy as np
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
 import pkgpr2.exponentialDecay as ed
 import sys
+
 
 def load_labels(clone=True):
     fn = "labels.{}.tab"
@@ -40,46 +42,35 @@ def durations_by_cat(sub_labels, label='label'):
 
     return frame
 
+
 def get_lam(frame, num_iter=1000):
     e = ed.ExponentialDecay(frame)
     return e.fit(frame, bootstrap=True, n_iter=num_iter)
 
-def durations_by_baseline(labels, save=None):
 
-    baseline = labels[labels.active_baseline_infection]
-    new_ifx = labels[~labels.active_baseline_infection]
+def durations_by_group(original_frame, group, save=None):
+    frame = original_frame.copy()
 
-    baseline_estimate, baseline_boots = get_lam(baseline)
-    ifx_estimate, ifx_boots = get_lam(new_ifx)
+    palette = sns.color_palette("Set2")
 
-    palette = sns.color_palette("Set1")
-
-    sns.distplot(1 / baseline_boots, label='Baseline', color = palette[0])
-    sns.distplot(1 / ifx_boots, label='New Infection', color = palette[1])
-
-    plt.axvline(1 / baseline_estimate, ls=':', color=palette[0])
-    plt.axvline(1 / ifx_estimate, ls=':', color=palette[1])
-
-    plt.legend()
-    plt.xlabel("Duration (days)")
-
-    if not save:
-        plt.show()
-    else:
-        print('saving figure : {}'.format(save))
-        plt.savefig(save)
-        plt.close()
-
-def durations_by_group(frame, group, save=None):
-
-    palette = sns.color_palette("Set1")
+    if 'active_baseline_infection' in group:
+        frame.active_baseline_infection = frame.active_baseline_infection.\
+            apply(
+                lambda x: "baseline" if x else "new infection"
+                )
 
     count = 0
     for idx, g_frame in frame.groupby(group):
+        print('calculating durations on group : {}'.format(idx))
+        if len(group) > 1:
+            label = '.'.join(idx)
+        else:
+            label = idx
+
         estimate, boots = get_lam(g_frame)
 
-        sns.distplot(1 / boots, label=idx, color = palette[count])
-        plt.axvline(1 / estimate, ls=':', color = palette[count])
+        sns.distplot(1 / boots, label=label, color=palette[count])
+        plt.axvline(1 / estimate, ls=':', color=palette[count])
         count += 1
 
     plt.legend()
@@ -92,6 +83,7 @@ def durations_by_group(frame, group, save=None):
         plt.savefig(save)
         plt.close()
 
+
 def main():
 
     plot_fn = "../plots/durations/{}.pdf"
@@ -99,35 +91,64 @@ def main():
     labels_clone = load_labels(clone=True)
     labels_ifx = load_labels(clone=False)
 
-
     # by agecat
     durations_by_group(
-        labels_clone, group = ['agecat'],
+        labels_clone, group=['agecat'],
         save=plot_fn.format('agecat_clone')
         )
     durations_by_group(
-        labels_ifx, group = ['agecat'],
+        labels_ifx, group=['agecat'],
         save=plot_fn.format('agecat_ifx')
         )
 
     # by gender
     durations_by_group(
-        labels_clone, group = ['gender'],
+        labels_clone, group=['gender'],
         save=plot_fn.format('sex_clone')
         )
     durations_by_group(
-        labels_ifx, group = ['gender'],
+        labels_ifx, group=['gender'],
         save=plot_fn.format('sex_ifx')
         )
 
     # by baseline
-    durations_by_baseline(
-        labels_clone,
+    durations_by_group(
+        labels_clone, group=['active_baseline_infection'],
         save=plot_fn.format('baseline_vs_new_clone')
         )
-    durations_by_baseline(
-        labels_ifx,
+    durations_by_group(
+        labels_ifx, group=['active_baseline_infection'],
         save=plot_fn.format('baseline_vs_new_ifx')
+        )
+
+    # by sex/baseline
+    durations_by_group(
+        labels_clone, group=['active_baseline_infection', 'gender'],
+        save=plot_fn.format('sex_baseline_vs_new_clone')
+        )
+    durations_by_group(
+        labels_ifx, group=['active_baseline_infection', 'gender'],
+        save=plot_fn.format('sex_baseline_vs_new_ifx')
+        )
+
+    # by age/baseline
+    durations_by_group(
+        labels_clone, group=['active_baseline_infection', 'agecat'],
+        save=plot_fn.format('agecat_baseline_vs_new_clone')
+        )
+    durations_by_group(
+        labels_ifx, group=['active_baseline_infection', 'agecat'],
+        save=plot_fn.format('agecat_baseline_vs_new_ifx')
+        )
+
+    # by agecat/gender
+    durations_by_group(
+        labels_clone, group=['gender', 'agecat'],
+        save=plot_fn.format('agecat_sex_clone')
+        )
+    durations_by_group(
+        labels_ifx, group=['gender', 'agecat'],
+        save=plot_fn.format('agecat_sex_ifx')
         )
 
 if __name__ == '__main__':
