@@ -245,9 +245,6 @@ class ExponentialDecay(object):
         if bootstrap:
             p = Pool()
             bootstrapped_lams = p.map(self.fit, bootstrap_frame(frame, n_iter))
-            # bootstrapped_lams = [
-            #     self.fit(b) for b in bootstrap_frame(frame, n_iter)
-            #     ]
 
         # generate durations and initial guess
         l1_d, l2_d, durations = self.GetInfectionDurations(frame)

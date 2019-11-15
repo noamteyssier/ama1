@@ -945,7 +945,7 @@ class InfectionLabeler(object):
 
         # adds malaria category
         self.labels = self.labels.merge(
-            self.meta[['cohortid', 'date', 'malariacat']],
+            self.meta[['cohortid', 'date', 'malariacat', 'qpcr']],
             how='left',
             left_on=['cohortid', 'date'],
             right_on=['cohortid', 'date']
