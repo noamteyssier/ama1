@@ -52,7 +52,9 @@ def bootstrap_frame(frame, num_iter):
 
         cid_indices = generate_indices(original_cids, sampled_cids)
 
-        yield frame.iloc[cid_indices]
+        bootstrap = frame.iloc[cid_indices]
+
+        yield bootstrap
 
 
 

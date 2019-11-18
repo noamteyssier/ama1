@@ -45,8 +45,10 @@ def durations_by_cat(sub_labels, label='label'):
 
 def get_lam(frame, num_iter=1000):
     e = ed.ExponentialDecay(frame)
-    return e.fit(bootstrap=True, n_iter=num_iter)
-
+    try:
+        return e.fit(bootstrap=True, n_iter=num_iter)
+    except:
+        return None
 
 def durations_by_group(original_frame, group, save=None):
     frame = original_frame.copy()
@@ -59,6 +61,8 @@ def durations_by_group(original_frame, group, save=None):
                 lambda x: "baseline" if x else "new infection"
                 )
 
+    results_dict = {}
+
     count = 0
     for idx, g_frame in frame.groupby(group):
         print('calculating durations on group : {}'.format(idx))
@@ -67,7 +71,10 @@ def durations_by_group(original_frame, group, save=None):
         else:
             label = idx
 
-        estimate, boots = get_lam(g_frame)
+        lams = get_lam(g_frame)
+        if lams:
+            estimate, boots = lams
+            results_dict[idx] = lams
 
         sns.distplot(1 / boots, label=label, color=palette[count])
         plt.axvline(1 / estimate, ls=':', color=palette[count])
@@ -83,6 +90,37 @@ def durations_by_group(original_frame, group, save=None):
         plt.savefig(save)
         plt.close()
 
+    return results_dict
+
+
+def bin_qpcr(frame):
+    vals = frame.\
+        groupby(['cohortid', 'h_popUID']).\
+        apply(lambda x : x.qpcr.values[0]).\
+        reset_index().\
+        rename(columns = {0: 'qpcr_val'})
+
+    vals['qpcr_bin'] = np.log10(vals.qpcr_val).round()
+    vals.loc[vals.qpcr_bin < 1, 'qpcr_bin'] = 0
+
+    return frame.merge(
+        vals[['cohortid', 'h_popUID', 'qpcr_bin']]
+        )
+
+
+def results_to_frame(results_dict):
+    frame = []
+    for idx in results_dict:
+        estimate, boots = results_dict[idx]
+        cis = np.percentile(1 / boots, [5, 95])
+        frame.append({
+            'grouping': idx,
+            'estimate': 1 / estimate,
+            'ci_05': cis[0],
+            'ci_95': cis[1]
+            })
+
+    return pd.DataFrame(frame)
 
 def main():
 
@@ -92,64 +130,83 @@ def main():
     labels_ifx = load_labels(clone=False)
 
     # by agecat
-    durations_by_group(
+    clone_agecat = durations_by_group(
         labels_clone, group=['agecat'],
         save=plot_fn.format('agecat_clone')
         )
-    durations_by_group(
+    idx_agecat = durations_by_group(
         labels_ifx, group=['agecat'],
         save=plot_fn.format('agecat_ifx')
         )
 
     # by gender
-    durations_by_group(
+    clone_gender = durations_by_group(
         labels_clone, group=['gender'],
         save=plot_fn.format('sex_clone')
         )
-    durations_by_group(
+    ifx_gender = durations_by_group(
         labels_ifx, group=['gender'],
         save=plot_fn.format('sex_ifx')
         )
 
     # by baseline
-    durations_by_group(
+    clone_baseline = durations_by_group(
         labels_clone, group=['active_baseline_infection'],
         save=plot_fn.format('baseline_vs_new_clone')
         )
-    durations_by_group(
+    ifx_baseline = durations_by_group(
         labels_ifx, group=['active_baseline_infection'],
         save=plot_fn.format('baseline_vs_new_ifx')
         )
 
     # by sex/baseline
-    durations_by_group(
+    clone_sexbaseline = durations_by_group(
         labels_clone, group=['active_baseline_infection', 'gender'],
         save=plot_fn.format('sex_baseline_vs_new_clone')
         )
-    durations_by_group(
+    ifx_sexbaseline = durations_by_group(
         labels_ifx, group=['active_baseline_infection', 'gender'],
         save=plot_fn.format('sex_baseline_vs_new_ifx')
         )
 
     # by age/baseline
-    durations_by_group(
+    clone_agebaseline = durations_by_group(
         labels_clone, group=['active_baseline_infection', 'agecat'],
         save=plot_fn.format('agecat_baseline_vs_new_clone')
         )
-    durations_by_group(
+    ifx_agebaseline = durations_by_group(
         labels_ifx, group=['active_baseline_infection', 'agecat'],
         save=plot_fn.format('agecat_baseline_vs_new_ifx')
         )
 
     # by agecat/gender
-    durations_by_group(
+    clone_agecatgender = durations_by_group(
         labels_clone, group=['gender', 'agecat'],
         save=plot_fn.format('agecat_sex_clone')
         )
-    durations_by_group(
+    ifx_agecatgender = durations_by_group(
         labels_ifx, group=['gender', 'agecat'],
         save=plot_fn.format('agecat_sex_ifx')
         )
 
+
+    clone_list = [clone_agecat, clone_gender, clone_baseline, clone_sexbaseline, clone_agebaseline, clone_agecatgender]
+    ifx_list = [idx_agecat, ifx_gender, ifx_baseline, ifx_sexbaseline, ifx_agebaseline, ifx_agecatgender]
+
+    clones = pd.concat([
+        results_to_frame(i) for i in clone_list
+        ])
+    ifxs = pd.concat([
+        results_to_frame(i) for i in ifx_list
+        ])
+
+    clones['ie_type'] = 'clone'
+    ifxs['ie_type'] = 'ifx_event'
+
+    frame = pd.concat([clones, ifxs])
+    frame.to_csv("durations.tab", sep="\t", index=False)
+
+
 if __name__ == '__main__':
     main()
+    # dev()
