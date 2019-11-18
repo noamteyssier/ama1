@@ -60,7 +60,7 @@ class ExponentialDecay(object):
 
     def __init__(self, infections,
                  left_censor='2018-01-01', right_censor='2019-04-01',
-                 minimum_duration=30, seed=None, skips=3
+                 minimum_duration=30, seed=None, skips=3, drop_person=True
                  ):
 
         if seed:
@@ -77,6 +77,7 @@ class ExponentialDecay(object):
         self.minimum_duration = pd.Timedelta(
             '{} Days'.format(minimum_duration)
             )
+        self.drop_person = drop_person
 
         self.durations = []
         self.num_classes = np.zeros(5)
@@ -89,32 +90,24 @@ class ExponentialDecay(object):
         Drop any infections with a malaria event
         """
 
-        to_drop = self.infections.\
-            groupby(['cohortid', 'h_popUID']).\
-            apply(
-                lambda x: np.any(x.malariacat == 'Malaria')
-                ).reset_index()
+        if self.drop_person:
+            to_drop = self.infections.\
+                groupby(['cohortid']).\
+                apply(
+                    lambda x: np.any(x.malariacat == 'Malaria')
+                    ).reset_index()
+        else:
+            to_drop = self.infections.\
+                groupby(['cohortid', 'h_popUID']).\
+                apply(
+                    lambda x: np.any(x.malariacat == 'Malaria')
+                    ).reset_index()
 
         self.infections = self.infections.\
             merge(to_drop, how='left')
 
         self.infections = self.infections[~self.infections[0]].\
             drop(columns=0)
-
-    def BootstrapInfections(self, frame):
-        """Bootstrap on Cohortid"""
-
-        mat = frame.values
-
-        cids = np.unique(mat[:, 0])
-
-        cid_choice = np.random.choice(cids, cids.size)
-
-        bootstrap = np.concatenate([
-            mat[mat[:, 0] == i] for i in cid_choice
-            ])
-
-        return pd.DataFrame(bootstrap, columns=frame.columns)
 
     def AddClassifications(self, class_vec):
         """

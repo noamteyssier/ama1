@@ -45,7 +45,7 @@ def durations_by_cat(sub_labels, label='label'):
 
 def get_lam(frame, num_iter=1000):
     e = ed.ExponentialDecay(frame)
-    return e.fit(frame, bootstrap=True, n_iter=num_iter)
+    return e.fit(bootstrap=True, n_iter=num_iter)
 
 
 def durations_by_group(original_frame, group, save=None):
