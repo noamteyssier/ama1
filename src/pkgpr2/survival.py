@@ -134,6 +134,8 @@ class Survival(object):
 
         plt.xlabel('Date')
         plt.ylabel('Percentage')
+        plt.xticks(rotation=45)
+        plt.tight_layout()
 
         if not save:
             plt.show()
