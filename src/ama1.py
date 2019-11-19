@@ -8,10 +8,10 @@ import sys
 
 from pkgpr2.pkgpr2 import InfectionLabeler
 from pkgpr2.pkgpr2 import FOI
-from pkgpr2.pkgpr2 import ExponentialDecay
-from pkgpr2.pkgpr2 import OldWaning
-from pkgpr2.pkgpr2 import FractionOldNew
-from pkgpr2.pkgpr2 import OldNewSurival
+from pkgpr2.exponentialDecay import ExponentialDecay
+from pkgpr2.survival import OldWaning
+from pkgpr2.survival import FractionOldNew
+from pkgpr2.survival import OldNewSurival
 
 
 def load_inputs():
