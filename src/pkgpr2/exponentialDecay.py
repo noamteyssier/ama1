@@ -262,7 +262,7 @@ class ExponentialDecay(object):
         else:
             return self.estimated_lam
 
-    def plot(self):
+    def plot(self, save=None):
         """
         Generate a plot of the distribution of bootstrapped lambdas
         """
@@ -279,5 +279,10 @@ class ExponentialDecay(object):
                 1/self.estimated_lam, 1/ci_max, 1/ci_min
                 )
             )
-        plt.show()
-        plt.close()
+
+        if not save:
+            plt.show()
+            plt.close()
+        else:
+            plt.savefig(save)
+            plt.close()

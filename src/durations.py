@@ -93,6 +93,16 @@ def durations_by_group(original_frame, group, save=None):
     return results_dict
 
 
+def durations(frame, name, num_iter=1000, save=None):
+    results_dict = {}
+    e = ed.ExponentialDecay(frame)
+    lams = e.fit(bootstrap=True, n_iter=num_iter)
+    e.plot(save=save)
+
+    results_dict = {name: lams}
+
+    return results_dict
+
 def bin_qpcr(frame):
     vals = frame.\
         groupby(['cohortid', 'h_popUID']).\
@@ -129,12 +139,22 @@ def main():
     labels_clone = load_labels(clone=True)
     labels_ifx = load_labels(clone=False)
 
+    # overall
+    clone_durations = durations(
+        labels_clone, name='overall_clone',
+        save=plot_fn.format('overall_clone')
+        )
+    ifx_durations = durations(
+        labels_ifx, name='overall_ifx',
+        save=plot_fn.format('overall_ifx')
+        )
+
     # by agecat
     clone_agecat = durations_by_group(
         labels_clone, group=['agecat'],
         save=plot_fn.format('agecat_clone')
         )
-    idx_agecat = durations_by_group(
+    ifx_agecat = durations_by_group(
         labels_ifx, group=['agecat'],
         save=plot_fn.format('agecat_ifx')
         )
@@ -190,8 +210,19 @@ def main():
         )
 
 
-    clone_list = [clone_agecat, clone_gender, clone_baseline, clone_sexbaseline, clone_agebaseline, clone_agecatgender]
-    ifx_list = [idx_agecat, ifx_gender, ifx_baseline, ifx_sexbaseline, ifx_agebaseline, ifx_agecatgender]
+    clone_list = [
+        clone_durations, clone_agecat,
+        clone_gender, clone_baseline,
+        clone_sexbaseline, clone_agebaseline,
+        clone_agecatgender
+        ]
+
+    ifx_list = [
+        ifx_durations, ifx_agecat,
+        ifx_gender, ifx_baseline,
+        ifx_sexbaseline, ifx_agebaseline,
+        ifx_agecatgender
+        ]
 
     clones = pd.concat([
         results_to_frame(i) for i in clone_list

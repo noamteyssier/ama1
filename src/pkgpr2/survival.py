@@ -13,6 +13,17 @@ from pandas.plotting import register_matplotlib_converters
 register_matplotlib_converters()
 
 
+orange_palette = ['#ce4326']
+blue_orange_green = ['#3052c6', '#ce4326', '#438e3e']
+blue_palette = ['#3052c6']
+line_width = 1.2
+line_style = ':'
+
+
+def convert_style(ax, n):
+    for i in range(n):
+        ax.lines[i].set_linestyle(line_style)
+
 
 # Survival
 
@@ -210,25 +221,28 @@ class FractionOldNew(Survival):
 
     def _plot(self):
 
+        sns.set_palette(orange_palette)
         if self.bootstrap:
 
             for v in self.original_results.active_new_infection.unique():
-
-                sns.lineplot(
+                ax = sns.lineplot(
                     data=self.original_results[
                         self.original_results.active_new_infection == v
                         ],
                     x='year_month',
                     y='pc',
                     label=v,
-                    lw=4
+                    lw=line_width,
                     )
+
+                convert_style(ax, 1)
 
                 plt.fill_between(
                     self.bootstrap_results[v].index,
                     [i for i, j in self.bootstrap_results[v].values],
                     [j for i, j in self.bootstrap_results[v].values],
                     alpha=0.5)
+
         else:
             sns.lineplot(
                 data=self.original_results,
@@ -241,7 +255,7 @@ class FractionOldNew(Survival):
         plt.title('Fraction of New Clones In Infected Population')
 
 
-class OldNewSurival(Survival):
+class OldNewSurvival(Survival):
     """
     Survival objects that calculates the fraction of old, new, and mixed clones
     in total population
@@ -331,16 +345,19 @@ class OldNewSurival(Survival):
             self.RunBootstraps()
 
     def _plot(self):
+
+        sns.set_palette(blue_orange_green)
         if self.bootstrap:
 
             for v in self.original_results.cid_active_new_infection.unique():
-                sns.lineplot(
+                ax = sns.lineplot(
                     data=self.original_results[
                         self.original_results.cid_active_new_infection == v
                         ],
                     x='year_month', y='pc',
-                    label=v, lw=4
+                    label=v, lw=line_width
                     )
+
                 plt.fill_between(
                     self.bootstrap_results[v].index,
                     [i for i, j in self.bootstrap_results[v].values],
@@ -354,6 +371,7 @@ class OldNewSurival(Survival):
                 hue='cid_active_new_infection'
                 )
 
+        convert_style(ax, 3)
         plt.title('Fraction of New and Old Clones by Individual')
 
 
@@ -438,11 +456,15 @@ class OldWaning(Survival):
             self.RunBootstraps()
 
     def _plot(self):
-        sns.lineplot(
+        sns.set_palette(blue_palette)
+
+        ax = sns.lineplot(
             data=self.original_results,
             x='year_month', y='pc',
-            legend=False, lw=5
+            legend=False, lw=line_width
             )
+
+        convert_style(ax, 1)
 
         if self.bootstrap:
             plt.fill_between(

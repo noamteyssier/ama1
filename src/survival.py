@@ -6,7 +6,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import pkgpr2.survival as sv
 import sys
-
+from multiprocess import Pool
 
 def load_inputs():
     sdo = pd.read_csv(
@@ -32,56 +32,34 @@ def load_labels(clone=True):
     return labels
 
 
-def run_FractionOldNew(save=None):
+def run_survival_function(svf_tuple, n_iter=300):
+    base_filename = "../plots/survival/{}.pdf"
+
+    svf, name = svf_tuple
+    save = base_filename.format(name)
+
     sdo, meta = load_inputs()
     labels = load_labels(clone=True)
 
-    fon = sv.FractionOldNew(
+    s_class = svf(
         infections=labels, meta=meta,
-        burnin=2, bootstrap=True, n_iter=200
+        burnin=2, bootstrap=True, n_iter=n_iter
         )
-    fon.fit()
-    fon.plot(save=save)
-
-
-def run_OldNewSurvival(save=None):
-    sdo, meta = load_inputs()
-    labels = load_labels(clone=True)
-
-    ons = sv.OldNewSurival(
-        infections=labels, meta=meta,
-        burnin=2, bootstrap=True, n_iter=200
-        )
-    ons.fit()
-    ons.plot(save=save)
-
-
-def run_OldWaning(save=None):
-    sdo, meta = load_inputs()
-    labels = load_labels(clone=True)
-
-    waning = sv.OldWaning(
-        infections=labels, meta=meta,
-        burnin=2, bootstrap=True, n_iter=200
-        )
-    waning.fit()
-    waning.plot(save=save)
+    s_class.fit()
+    s_class.plot(save=save)
 
 
 def main():
     base_filename = "../plots/survival/{}.pdf"
 
-    run_FractionOldNew(
-        save=base_filename.format('FractionOldNew')
-        )
+    survival_functions = [
+        (sv.FractionOldNew, 'FractionNew'),
+        (sv.OldNewSurvival, 'OldNewMix'),
+        (sv.OldWaning, 'OldWaning')
+        ]
 
-    run_OldNewSurvival(
-        save=base_filename.format('OldNewMix')
-        )
-
-    run_OldWaning(
-        save=base_filename.format('OldWaning')
-        )
+    p = Pool()
+    p.map(run_survival_function, survival_functions)
 
 
 
