@@ -50,6 +50,7 @@ def get_lam(frame, num_iter=1000):
     except:
         return None
 
+
 def durations_by_group(original_frame, group, save=None):
     frame = original_frame.copy()
 
@@ -103,6 +104,7 @@ def durations(frame, name, num_iter=1000, save=None):
 
     return results_dict
 
+
 def bin_qpcr(frame):
     vals = frame.\
         groupby(['cohortid', 'h_popUID']).\
@@ -131,6 +133,7 @@ def results_to_frame(results_dict):
             })
 
     return pd.DataFrame(frame)
+
 
 def main():
 
