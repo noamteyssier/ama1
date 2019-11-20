@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 
 from pkgpr2.pkgpr2 import InfectionLabeler, FOI
 from pkgpr2.exponentialDecay import ExponentialDecay
-from pkgpr2.survival import OldWaning, FractionOldNew, OldNewSurival
+from pkgpr2.survival import OldWaning, FractionOldNew, OldNewSurvival
 
 
 def get_args():

@@ -144,11 +144,11 @@ def main():
 
     # overall
     clone_durations = durations(
-        labels_clone, name='overall_clone',
+        labels_clone, name='overall',
         save=plot_fn.format('overall_clone')
         )
     ifx_durations = durations(
-        labels_ifx, name='overall_ifx',
+        labels_ifx, name='overall',
         save=plot_fn.format('overall_ifx')
         )
 
