@@ -2,6 +2,9 @@ library(tidyverse)
 
 
 plot_durations <- function(frame){
+  
+  all_values <- c(frame$estimate, frame$ci_05, frame$ci_95)
+  
   ggplot(frame, aes(x = grouping, y = estimate, color=ie_type)) +
     geom_errorbar(
       aes(ymin = ci_05, ymax = ci_95), 
@@ -14,7 +17,16 @@ plot_durations <- function(frame){
     ) +
     coord_flip() +
     scale_color_brewer(palette='Dark2') +
-    theme_classic()
+    theme_classic() +
+    scale_y_continuous(
+      breaks = pretty(all_values, n=10)
+      ) +
+    theme(
+      axis.text.x = element_text(angle=45, hjust=1)
+    ) +
+    ylab('Estimated Duration (days)') +
+    xlab('Group')
+
 }
 
 apply_filter <- function(frame, categories){
@@ -38,7 +50,8 @@ durations <- read_tsv("durations.tab")
 
 categories_plot_a <- c(
   'overall', 'Female', 'Male', 
-  '< 5 years', '5-15 years', '16 years or older'
+  '< 5 years', '5-15 years', '16 years or older',
+  'baseline', 'new infection'
 ) 
 
 categories_plot_b <- c(
@@ -57,3 +70,4 @@ ggsave("../plots/durations/errorbar_durationsOverall.pdf")
 
 plot_durations(durations_b)            
 ggsave("../plots/durations/errorbars_durationsGender.pdf")
+
