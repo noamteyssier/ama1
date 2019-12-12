@@ -27,12 +27,12 @@ def decay_function(lam, l1_durations, l2_durations):
     return -1 * llk
 
 
-@nb.jit(nopython=True)
+#@nb.jit(nopython=True)
 def sample_cohortid(cids):
     return np.random.choice(cids, cids.size)
 
 
-@nb.jit(nopython=True)
+#@nb.jit(nopython=True)
 def generate_indices(original_cids, sampled_cids):
     arr = []
     for i in np.arange(sampled_cids.size):

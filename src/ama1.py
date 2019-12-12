@@ -11,7 +11,7 @@ from pkgpr2.pkgpr2 import FOI
 from pkgpr2.exponentialDecay import ExponentialDecay
 from pkgpr2.survival import OldWaning
 from pkgpr2.survival import FractionOldNew
-from pkgpr2.survival import OldNewSurival
+from pkgpr2.survival import OldNewSurvival
 
 
 def load_inputs():
@@ -46,10 +46,12 @@ def dev_infectionLabeler():
         qpcr_threshold=0, burnin=2
         )
 
-    labels = il.LabelInfections(by_clone=True)
+    labels = il.LabelInfections(by_clone=True, long_form=True)
+    # print(labels)
+
     # sys.exit(labels)
     # print(labels_a)
-    labels.to_csv('labels.clone.tab', sep="\t", index=False)
+    labels.to_csv('labels.longform.clone.tab', sep="\t", index=False)
 
 
 def dev_FOI():

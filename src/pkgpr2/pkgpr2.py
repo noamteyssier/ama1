@@ -715,7 +715,61 @@ class Individual(object):
         else:
             return False
 
-    def LabelInfections(self, by_clone=True, impute=False):
+    def MakeLongForm(self):
+
+        def convert_dataframe(hid, x, ifx_idx):
+            frame_dict = []
+            for i in ifx_idx[:-1]:
+                frame_dict.append({
+                    'cohortid': self.cid,
+                    'h_popUID': hid,
+                    'date': self.dates[i],
+                    'end_date': self.dates[i+1],
+                    'agecat': x.agecat.unique()[0],
+                    'gender': x.gender.unique()[0],
+                    'active_baseline_infection': x.active_baseline_infection.max(),
+                    'terminal': False
+                    })
+
+            if ifx_idx[-1] == len(self.dates) - 1:
+                frame_dict[-1]['terminal'] = True
+            else:
+                frame_dict.append({
+                    'cohortid': self.cid,
+                    'h_popUID': hid,
+                    'date': self.dates[ifx_idx[-1]],
+                    'end_date': self.dates[ifx_idx[-1] + 1],
+                    'agecat': x.agecat.unique()[0],
+                    'gender': x.gender.unique()[0],
+                    'active_baseline_infection': x.active_baseline_infection.max(),
+                    'terminal': True
+                    })
+
+            frame = pd.DataFrame(frame_dict)
+            return frame
+
+        def convert_longform(hid, x):
+            interval_min = x.date.min().to_datetime64()
+            interval_max = x.date.max().to_datetime64()
+
+            ifx_idx = np.where(
+                (self.dates >= interval_min) &
+                (self.dates <= interval_max)
+                )[0]
+
+            frame = convert_dataframe(hid, x, ifx_idx)
+            return frame
+
+        if self.labels.empty:
+            return
+
+        hid_frames = []
+        for hid, g in self.labels.groupby(['h_popUID']):
+            hid_frames.append(convert_longform(hid, g))
+
+        self.labels = pd.concat(hid_frames)
+
+    def LabelInfections(self, by_clone=True, long_form=False, impute=False):
         merge_cols = ['cohortid', 'enrolldate', 'burnin', 'gender', 'agecat']
 
         if by_clone:
@@ -747,6 +801,9 @@ class Individual(object):
                 self.CollapseInfectionEvents()
                 self.FillMissingDates()
 
+        if long_form:
+            self.MakeLongForm()
+        # sys.exit()
         return self.labels
 
     def plot_haplodrop(self, infection_event=True, save=False, prefix=None):
@@ -921,7 +978,7 @@ class InfectionLabeler(object):
         Create Individual objects for each individual in the cohort
         """
 
-        # self.frame = self.frame[self.frame.cohortid == '3602']
+        # self.frame = self.frame[self.frame.cohortid == '3597']
 
         iter_frame = tqdm(
             self.frame.groupby('cohortid'),
@@ -945,13 +1002,15 @@ class InfectionLabeler(object):
 
         # adds malaria category
         self.labels = self.labels.merge(
-            self.meta[['cohortid', 'date', 'malariacat', 'qpcr']],
+            self.meta[
+                ['cohortid', 'date', 'malariacat', 'qpcr', 'hhid', 'hemoglobin']
+                ],
             how='left',
             left_on=['cohortid', 'date'],
             right_on=['cohortid', 'date']
             )
 
-    def LabelInfections(self, by_clone=True):
+    def LabelInfections(self, by_clone=True, long_form=False):
         """
         Label infections for all individuals in the cohort
 
@@ -962,7 +1021,7 @@ class InfectionLabeler(object):
 
         """
         def pooled_run(cid):
-            return cid.LabelInfections(by_clone=by_clone)
+            return cid.LabelInfections(by_clone=by_clone, long_form=long_form)
 
         iter_cohort = tqdm(
             self.cohort,
