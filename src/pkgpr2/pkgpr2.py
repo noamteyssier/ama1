@@ -716,8 +716,16 @@ class Individual(object):
             return False
 
     def MakeLongForm(self):
+        """
+        Converts label dataframe from single timepoints to intervals of
+        timepoint to timepoint with interpolation over skipped dates as
+        characeterized by skip rules
+        """
 
         def convert_dataframe(hid, x, ifx_idx):
+            """
+            labels terminal intervals and gathers relevant meta for dataframe
+            """
             frame_dict = []
             for i in ifx_idx[:-1]:
                 frame_dict.append({
@@ -748,7 +756,11 @@ class Individual(object):
             frame = pd.DataFrame(frame_dict)
             return frame
 
-        def convert_longform(hid, x):
+        def convert_longform(hid, baseline_ifx, x):
+            """
+            Identity minimum and maximum dates of infection then creates
+            intervals
+            """
             interval_min = x.date.min().to_datetime64()
             interval_max = x.date.max().to_datetime64()
 
@@ -764,8 +776,11 @@ class Individual(object):
             return
 
         hid_frames = []
-        for hid, g in self.labels.groupby(['h_popUID']):
-            hid_frames.append(convert_longform(hid, g))
+        for hid_ifx, g in self.labels.groupby(['h_popUID', 'active_baseline_infection']):
+            hid, baseline_ifx = hid_ifx
+            hid_frames.append(
+                convert_longform(hid, baseline_ifx, g)
+                )
 
         self.labels = pd.concat(hid_frames)
 
@@ -803,7 +818,7 @@ class Individual(object):
 
         if long_form:
             self.MakeLongForm()
-        # sys.exit()
+
         return self.labels
 
     def plot_haplodrop(self, infection_event=True, save=False, prefix=None):
@@ -978,7 +993,7 @@ class InfectionLabeler(object):
         Create Individual objects for each individual in the cohort
         """
 
-        # self.frame = self.frame[self.frame.cohortid == '3597']
+        # self.frame = self.frame[self.frame.cohortid == '3578']
 
         iter_frame = tqdm(
             self.frame.groupby('cohortid'),

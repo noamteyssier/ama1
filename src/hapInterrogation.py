@@ -17,21 +17,18 @@ def get_args():
     p = argparse.ArgumentParser()
 
     # seekdeep output
-    p.add_argument(
-        '-i', '--seekdeep_output', required=False,
+    p.add_argument('-i', '--seekdeep_output', required=False,
         default="../prism2/full_prism2/final_filter.tab",
         help="SeekDeep Output to use as input to functions"
         )
 
     # meta
-    p.add_argument(
-        '-m', '--meta', required=False,
+    p.add_argument('-m', '--meta', required=False,
         default="../prism2/stata/full_meta_6mo.tab",
         help="Cohort Meta information (tsv) to relate cohortids")
 
     # label flag
-    p.add_argument(
-        '-l', '--label_infections',
+    p.add_argument('-l', '--label_infections',
         action='store_true',
         help=(
             "Create a dataframe showing the start and end of"
@@ -40,8 +37,7 @@ def get_args():
         )
 
     # foi flag
-    p.add_argument(
-        '-f', '--force_of_infection',
+    p.add_argument('-f', '--force_of_infection',
         type=str,
         help=(
             "Calculate the Force of Infection of the Population"
@@ -51,8 +47,7 @@ def get_args():
         )
 
     # durations flag
-    p.add_argument(
-        '-d', '--durations',
+    p.add_argument('-d', '--durations',
         type=str,
         help=(
             "Estimate duration of infections using an exponential decay model "
@@ -61,8 +56,7 @@ def get_args():
         )
 
     # survival flag
-    p.add_argument(
-        '-s', '--survival',
+    p.add_argument('-s', '--survival',
         type=str,
         help=(
             'Plot survival of old/new haplotypes '
@@ -71,8 +65,7 @@ def get_args():
         )
 
     # skip threshold
-    p.add_argument(
-        '-n', '--skip_threshold',
+    p.add_argument('-n', '--skip_threshold',
         default=3,
         type=int,
         help=(
@@ -82,8 +75,7 @@ def get_args():
         )
 
     # burnin
-    p.add_argument(
-        '-b', '--burnin',
+    p.add_argument('-b', '--burnin',
         default=2,
         type=int,
         help=(
@@ -93,8 +85,7 @@ def get_args():
         )
 
     # qpcr threshold
-    p.add_argument(
-        '-q', '--qpcr_threshold',
+    p.add_argument('-q', '--qpcr_threshold',
         default=0,
         type=float,
         required=False,
@@ -102,24 +93,21 @@ def get_args():
         )
 
     # by infection event
-    p.add_argument(
-        '--by_infection_event',
+    p.add_argument('--by_infection_event',
         action='store_false',
         required=False,
         help='Aggregate labels by infection events'
         )
 
     # no impute
-    p.add_argument(
-        '--no_impute',
+    p.add_argument('--no_impute',
         action='store_false',
         required=False,
         help='Dont impute missing haplotypes when collapsing by date '
         )
 
     # no aggregation
-    p.add_argument(
-        '--no_aggregation',
+    p.add_argument('--no_aggregation',
         action='store_false',
         required=False,
         help=(
@@ -129,8 +117,7 @@ def get_args():
         )
 
     # no drop missing
-    p.add_argument(
-        "--no_drop_missing",
+    p.add_argument("--no_drop_missing",
         action='store_false',
         help=(
             "Count missing genotyping but qpcr positive"
@@ -139,12 +126,18 @@ def get_args():
         )
 
     # number of bootstraps
-    p.add_argument(
-        "--num_bootstraps",
+    p.add_argument("--num_bootstraps",
         default=200,
         type=int,
         help='number of times to bootstrap'
         )
+
+    # convert labels to date-date interval long form
+    p.add_argument("--longform",
+        action='store_true',
+        help='Convert labels output to date to date intervals'
+        )
+
 
     # if no args given print help
     if len(sys.argv) == 1:
@@ -171,7 +164,10 @@ def label_infections(sdo, meta, args):
         agg_infection_event=args.no_aggregation
     )
 
-    labels = il.LabelInfections(by_clone=args.by_infection_event)
+    labels = il.LabelInfections(
+        by_clone=args.by_infection_event,
+        long_form=args.longform
+        )
     return labels
 
 
