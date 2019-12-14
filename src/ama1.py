@@ -46,12 +46,12 @@ def dev_infectionLabeler():
         qpcr_threshold=0, burnin=2
         )
 
-    labels = il.LabelInfections(by_clone=True, long_form=True)
-    # print(labels)
+    labels = il.LabelInfections(by_clone=False, long_form=True)
+    print(labels)
 
     # sys.exit(labels)
     # print(labels_a)
-    labels.to_csv('labels.longform.clone.tab', sep="\t", index=False)
+    # labels.to_csv('labels.longform.clone.tab', sep="\t", index=False)
 
 
 def dev_FOI():

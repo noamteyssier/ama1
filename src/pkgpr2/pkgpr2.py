@@ -769,7 +769,10 @@ class Individual(object):
                 (self.dates <= interval_max)
                 )[0]
 
-            frame = convert_dataframe(hid, x, ifx_idx)
+            try:
+                frame = convert_dataframe(hid, x, ifx_idx)
+            except IndexError:
+                frame = pd.DataFrame()
             return frame
 
         if self.labels.empty:
@@ -782,7 +785,12 @@ class Individual(object):
                 convert_longform(hid, baseline_ifx, g)
                 )
 
-        self.labels = pd.concat(hid_frames)
+        try:
+            self.labels = pd.concat(
+                [i for i in hid_frames if not i.empty]
+                )
+        except ValueError:
+            self.labels = pd.DataFrame()
 
     def LabelInfections(self, by_clone=True, long_form=False, impute=False):
         merge_cols = ['cohortid', 'enrolldate', 'burnin', 'gender', 'agecat']
