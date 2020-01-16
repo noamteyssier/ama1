@@ -792,6 +792,46 @@ class Individual(object):
         except ValueError:
             self.labels = pd.DataFrame()
 
+    def InterpolateMissing(self):
+        """
+        Add entries to dates missing with skip rule
+        """
+
+        added_labels = []
+        for h_i, frame in self.labels.groupby(['h_popUID', 'active_new_infection']):
+            hid, ifx_group = h_i
+
+            ifx_min = np.datetime64(min(frame.date))
+            ifx_max = np.datetime64(max(frame.date))
+
+            missing_dates_idx = np.where(
+                (self.dates > ifx_min) &
+                (self.dates < ifx_max) &
+                ~(np.isin(self.dates, frame.date))
+                )[0]
+
+            for idx in missing_dates_idx:
+                frame = frame.append({
+                    "cohortid": self.cid,
+                    "h_popUID": hid,
+                    "date": self.dates[idx],
+                    "visit_number": idx,
+                    "skips": 0,
+                    "enrolldate": frame.enrolldate.values[0],
+                    "burnin": frame.burnin.values[0],
+                    "gender": frame.gender.values[0],
+                    "agecat": frame.agecat.values[0],
+                    "hid_visit_number": -1,
+                    "infection_event": False,
+                    "active_new_infection": ifx_group,
+                    "active_baseline_infection": (not ifx_group)
+                }, ignore_index=True)
+
+            added_labels.append(frame)
+
+        self.labels = pd.concat(added_labels)
+        self.labels.sort_values(by='date', inplace=True)
+
     def LabelInfections(self, by_clone=True, long_form=False, impute=False):
         merge_cols = ['cohortid', 'enrolldate', 'burnin', 'gender', 'agecat']
 
@@ -826,6 +866,13 @@ class Individual(object):
 
         if long_form:
             self.MakeLongForm()
+        elif not impute:
+            """
+            interpolate missing dates of active infections
+            requires impute to be false to not interfere with IE calling
+            """
+            if not self.labels.empty:
+                self.InterpolateMissing()
 
         return self.labels
 
@@ -1001,7 +1048,7 @@ class InfectionLabeler(object):
         Create Individual objects for each individual in the cohort
         """
 
-        # self.frame = self.frame[self.frame.cohortid == '3578']
+        # self.frame = self.frame[self.frame.cohortid == '3095']
 
         iter_frame = tqdm(
             self.frame.groupby('cohortid'),
