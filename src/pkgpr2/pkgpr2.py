@@ -401,7 +401,7 @@ class Individual(object):
 
         # if there are no infection events quit
         if ifx_dates.size == 0:
-            self.labels['ie'] = 'ifx_events.0'
+            self.labels['ie'] = 'ifx_event.0'
             return
 
         # label infection events by date
