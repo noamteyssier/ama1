@@ -119,7 +119,9 @@ class Individual(object):
         try:
             self.post_burnin = np.where(self.dates >= self.burnin)[0].min()
 
+        # case where no visits are post burnin
         except ValueError:
+            self.post_burnin = None
             return False
 
         if self.dates[self.post_burnin] > self.burnin:
@@ -328,8 +330,8 @@ class Individual(object):
 
             # calculate skips
             skips = self.PositionalDifference(
-                hid_arr, self.post_burnin
-                )
+                    hid_arr, self.post_burnin
+                    )
 
             # find dates where h_popUID is present
             hid_dates = self.dates[hid_arr]
@@ -833,6 +835,10 @@ class Individual(object):
         self.labels.sort_values(by='date', inplace=True)
 
     def LabelInfections(self, by_clone=True, long_form=False, impute=False):
+        # only calculate labels on cids with a post burnin value
+        if not self.post_burnin:
+            return None
+
         merge_cols = ['cohortid', 'enrolldate', 'burnin', 'gender', 'agecat']
 
         if by_clone:
@@ -1048,7 +1054,7 @@ class InfectionLabeler(object):
         Create Individual objects for each individual in the cohort
         """
 
-        # self.frame = self.frame[self.frame.cohortid == '3095']
+        # self.frame = self.frame[self.frame.cohortid == '3447']
 
         iter_frame = tqdm(
             self.frame.groupby('cohortid'),
