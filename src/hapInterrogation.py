@@ -138,6 +138,12 @@ def get_args():
         help='Convert labels output to date to date intervals'
         )
 
+    # create haplodrop plots
+    p.add_argument("--haplodrop",
+        action='store_true',
+        help='write haplodrop plots'
+        )
+
 
     # if no args given print help
     if len(sys.argv) == 1:
@@ -161,7 +167,8 @@ def label_infections(sdo, meta, args):
         skip_threshold=args.skip_threshold,
         by_infection_event=args.by_infection_event,
         impute_missing=args.no_impute,
-        agg_infection_event=args.no_aggregation
+        agg_infection_event=args.no_aggregation,
+        haplodrop=args.haplodrop
     )
 
     labels = il.LabelInfections(
